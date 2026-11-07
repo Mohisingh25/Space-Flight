@@ -1,0 +1,5 @@
+<!-- Keep assemblies that are accessed through reflection (render pipeline settings). -->
+<linker>
+  <assembly fullname="Unity.RenderPipelines.Universal.Runtime" preserve="all"/>
+  <assembly fullname="Unity.RenderPipelines.Core.Runtime" preserve="all"/>
+</linker>
