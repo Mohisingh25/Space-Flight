@@ -13,6 +13,22 @@ namespace Apogee.Builder
         float yawGoal, pitchGoal, distanceGoal;
 
         public const float MinDistance = 3f, MaxDistance = 320f;
+        public bool Mode2D { get; private set; }
+
+        /// <summary>2D mode: flat side-on orthographic view (like a blueprint), drag pans instead of orbiting.</summary>
+        public void SetMode2D(bool on)
+        {
+            Mode2D = on;
+            Cam.orthographic = on;
+            if (on) { yawGoal = yaw = 0f; pitchGoal = pitch = 0f; }
+            else { yawGoal = 35f; pitchGoal = 12f; }
+        }
+
+        /// <summary>Visible height of the view at the rocket, in metres.</summary>
+        public float ViewHeight
+        {
+            get { return Mode2D ? Cam.orthographicSize * 2f : 2f * distance * Mathf.Tan(Cam.fieldOfView * 0.5f * Mathf.Deg2Rad); }
+        }
 
         void Awake()
         {
@@ -30,6 +46,7 @@ namespace Apogee.Builder
 
         public void Rotate(Vector2 pixelDelta)
         {
+            if (Mode2D) { Pan(pixelDelta); return; }
             float k = 0.18f * sensitivity * 1080f / Mathf.Max(480f, Screen.height);
             yawGoal += pixelDelta.x * k;
             pitchGoal = Mathf.Clamp(pitchGoal - pixelDelta.y * k, -8f, 82f);
@@ -45,6 +62,7 @@ namespace Apogee.Builder
             float k = distanceGoal * 0.0016f * 1080f / Mathf.Max(480f, Screen.height);
             var right = transform.right;
             right.y = 0f;
+            if (Mode2D) k = Cam.orthographicSize * 2f / Mathf.Max(480f, Screen.height);
             targetGoal += -right.normalized * pixelDelta.x * k + Vector3.down * pixelDelta.y * k;
             targetGoal.y = Mathf.Clamp(targetGoal.y, 0.5f, 140f);
             targetGoal.x = Mathf.Clamp(targetGoal.x, -40f, 40f);
@@ -80,6 +98,12 @@ namespace Apogee.Builder
         {
             var rot = Quaternion.Euler(pitch, yaw, 0f);
             var pos = target - rot * Vector3.forward * distance;
+            if (Mode2D)
+            {
+                Cam.orthographicSize = distance * Mathf.Tan(Cam.fieldOfView * 0.5f * Mathf.Deg2Rad);
+                transform.SetPositionAndRotation(new Vector3(target.x, target.y, -200f), Quaternion.identity);
+                return;
+            }
             if (pos.y < 0.4f) pos.y = 0.4f;
             transform.SetPositionAndRotation(pos, Quaternion.LookRotation(target - pos, Vector3.up));
         }

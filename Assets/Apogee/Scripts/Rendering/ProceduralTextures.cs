@@ -31,6 +31,7 @@ namespace Apogee.Rendering
                 case "concrete": t = Concrete(256); break;
                 case "wall": t = Wall(256); break;
                 case "grating": t = Grating(128); break;
+                case "soil": t = Soil(256); break;
                 default: t = Solid(Color.white); break;
             }
             t.name = "Apogee_" + key;
@@ -248,6 +249,22 @@ namespace Apogee.Rendering
                     float val = 0.7f + (Tile(u, v, 3f, 3) - 0.5f) * 0.1f;
                     if (x % (s / 4) < 3) val *= 0.75f;          // vertical ribs
                     if (y % (s / 2) < 2) val *= 0.6f;
+                    px[y * s + x] = Gray(val);
+                }
+            return Make(s, s, px);
+        }
+
+        /// <summary>Ground detail: mottled earth with grass tufts and pebbles (multiplied with biome colour).</summary>
+        static Texture2D Soil(int s)
+        {
+            var px = new Color32[s * s];
+            for (int y = 0; y < s; y++)
+                for (int x = 0; x < s; x++)
+                {
+                    float u = (float)x / s, v = (float)y / s;
+                    float n = Tile(u, v, 5f, 5);
+                    float fine = Tile(u, v, 24f, 2, 4f);
+                    float val = 0.72f + (n - 0.5f) * 0.35f + (fine - 0.5f) * 0.25f;
                     px[y * s + x] = Gray(val);
                 }
             return Make(s, s, px);

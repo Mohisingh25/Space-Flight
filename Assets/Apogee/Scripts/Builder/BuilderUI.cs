@@ -60,7 +60,7 @@ namespace Apogee.Builder
         RectTransform root;
 
         // top bar
-        Button nameButton, undoButton, redoButton, symButton, stagingButton;
+        Button nameButton, undoButton, redoButton, symButton, stagingButton, modeButton;
 
         // parts
         PartCategory category = PartCategory.Command;
@@ -117,24 +117,24 @@ namespace Apogee.Builder
             var h = UIFactory.Horizontal(row, 10, 0, true);
             h.childAlignment = TextAnchor.MiddleLeft;
 
-            UIFactory.Size(UIFactory.Button(row, "Menu", c.BackToMenu), 130);
+            UIFactory.Size(UIFactory.Button(row, "Menu", c.BackToMenu), 110);
             nameButton = UIFactory.Button(row, "Untitled", c.SaveAs, ButtonStyle.Ghost, 28);
             UIFactory.Size(nameButton, 200, -1, 1);
             nameButton.GetComponentInChildren<Text>().alignment = TextAnchor.MiddleLeft;
             undoButton = UIFactory.Button(row, "Undo", c.Undo);
-            UIFactory.Size(undoButton, 120);
+            UIFactory.Size(undoButton, 105);
             redoButton = UIFactory.Button(row, "Redo", c.Redo);
-            UIFactory.Size(redoButton, 120);
-            symButton = UIFactory.Button(row, "Symmetry ×1", c.CycleSymmetry);
-            UIFactory.Size(symButton, 190);
+            UIFactory.Size(redoButton, 105);
+            symButton = UIFactory.Button(row, "Sym ×1", c.CycleSymmetry);
+            UIFactory.Size(symButton, 130);
             stagingButton = UIFactory.Button(row, "Staging", () => { c.StagingOpen = !c.StagingOpen; Refresh(); });
-            UIFactory.Size(stagingButton, 150);
-            UIFactory.Size(UIFactory.Button(row, "New", c.NewDesign), 110);
-            UIFactory.Size(UIFactory.Button(row, "Open", c.OpenLoadDialog), 110);
-            UIFactory.Size(UIFactory.Button(row, "Save", c.Save, ButtonStyle.Primary), 120);
-            var launch = UIFactory.Button(row, "Launch (Phase 2)", null);
-            launch.interactable = false;
-            UIFactory.Size(launch, 230);
+            UIFactory.Size(stagingButton, 140);
+            modeButton = UIFactory.Button(row, "2D", c.ToggleMode2D);
+            UIFactory.Size(modeButton, 100);
+            UIFactory.Size(UIFactory.Button(row, "New", c.NewDesign), 100);
+            UIFactory.Size(UIFactory.Button(row, "Open", c.OpenLoadDialog), 100);
+            UIFactory.Size(UIFactory.Button(row, "Save", c.Save), 110);
+            UIFactory.Size(UIFactory.Button(row, "Launch", c.Launch, ButtonStyle.Primary, 30), 180);
         }
 
         void BuildPartsPanel()
@@ -291,12 +291,13 @@ namespace Apogee.Builder
         public void Refresh()
         {
             if (c == null || c.Bp == null) return;
-            UIFactory.SetLabel(nameButton, c.Bp.name + (c.Bp.IsEmpty ? "" : "   <size=20><color=#8fa3b8>tap to rename / save as</color></size>"));
+            UIFactory.SetLabel(nameButton, c.Bp.name + (c.Bp.IsEmpty ? "" : "   <size=18><color=#8fa3b8>rename</color></size>"));
             undoButton.interactable = c.CanUndo;
             redoButton.interactable = c.CanRedo;
-            UIFactory.SetLabel(symButton, "Symmetry ×" + c.Symmetry);
+            UIFactory.SetLabel(symButton, "Sym ×" + c.Symmetry);
             UIFactory.SetLabel(holdSymButton, "Symmetry ×" + c.Symmetry);
             UIFactory.SetButtonColor(stagingButton, c.StagingOpen ? Theme.ButtonPrimary : Theme.ButtonBg);
+            UIFactory.SetLabel(modeButton, c.Mode2D ? "3D" : "2D");
 
             emptyHint.gameObject.SetActive(c.Bp.IsEmpty && !c.IsHolding);
             holdBar.gameObject.SetActive(c.IsHolding);

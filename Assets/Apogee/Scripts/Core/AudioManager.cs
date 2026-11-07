@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Apogee.Core
 {
-    public enum Sfx { Click, Snap, Error, Whoosh, Detach }
+    public enum Sfx { Click, Snap, Error, Whoosh, Detach, Explosion }
     public enum Ambience { None, Space, Hangar }
 
     /// <summary>
@@ -36,6 +36,7 @@ namespace Apogee.Core
             clips[Sfx.Error] = Make("error", 0.32f, Error);
             clips[Sfx.Whoosh] = Make("whoosh", 0.35f, Whoosh);
             clips[Sfx.Detach] = Make("detach", 0.18f, Detach);
+            clips[Sfx.Explosion] = Make("explosion", 2.6f, Boom);
         }
 
         public void Play(Sfx s, float volume = 1f)
@@ -43,6 +44,15 @@ namespace Apogee.Core
             AudioClip c;
             if (settings == null || !clips.TryGetValue(s, out c)) return;
             sfxSource.PlayOneShot(c, Mathf.Clamp01(volume * settings.sfxVolume));
+        }
+
+        AudioClip engineLoop;
+
+        /// <summary>Seamless rocket-engine roar: low rumble, mid-band crackle and turbopump whine.</summary>
+        public AudioClip EngineLoop()
+        {
+            if (engineLoop == null) engineLoop = MakeLoop("engine", 6f, 22050, EngineRoar);
+            return engineLoop;
         }
 
         public void SetAmbience(Ambience a)
@@ -119,7 +129,33 @@ namespace Apogee.Core
             return Mathf.Sin(2f * Mathf.PI * f * t) * Env(t, 0.002f, 0.05f) * 0.3f;
         }
 
+        static float boomLp;
+        static float Boom(float t, float d, System.Random r)
+        {
+            float white = (float)r.NextDouble() * 2f - 1f;
+            boomLp += (white - boomLp) * Mathf.Lerp(0.5f, 0.03f, Mathf.Clamp01(t * 2f));
+            float thump = Mathf.Sin(2f * Mathf.PI * Mathf.Lerp(70f, 30f, t / d) * t) * Mathf.Exp(-t * 3f);
+            return (boomLp * 2.2f + thump * 0.8f) * Env(t, 0.003f, 0.7f);
+        }
+
         delegate void LoopFill(float[] data, int rate, System.Random rng);
+
+        static void EngineRoar(float[] d, int rate, System.Random r)
+        {
+            float lp1 = 0f, lp2 = 0f, lp3 = 0f;
+            for (int i = 0; i < d.Length; i++)
+            {
+                float t = (float)i / rate;
+                float white = (float)r.NextDouble() * 2f - 1f;
+                lp1 += (white - lp1) * 0.035f;           // deep rumble
+                lp2 += (white - lp2) * 0.22f;            // roar
+                lp3 += (lp2 - lp3) * 0.5f;
+                float crackle = r.NextDouble() < 0.0025 ? ((float)r.NextDouble() * 2f - 1f) * 0.8f : 0f;
+                float wobble = 0.85f + 0.15f * Mathf.Sin(2f * Mathf.PI * 0.7f * t) * Mathf.Sin(2f * Mathf.PI * 0.23f * t);
+                float whine = Mathf.Sin(2f * Mathf.PI * 1180f * t) * 0.012f;
+                d[i] = Mathf.Clamp((lp1 * 3.2f + (lp2 - lp3) * 0.9f + crackle) * wobble + whine, -1f, 1f) * 0.8f;
+            }
+        }
 
         static AudioClip MakeLoop(string name, float seconds, int rate, LoopFill fill)
         {

@@ -16,12 +16,14 @@ namespace Apogee.Core
         public static BuilderEntry builderEntry = BuilderEntry.Continue;
         public static RocketBlueprint blueprintToOpen;
         public static string blueprintPath;
+        public static RocketBlueprint flightBlueprint;
     }
 
     public static class Scenes
     {
         public const string MainMenu = "MainMenu";
         public const string Builder = "Builder";
+        public const string Flight = "Flight";
     }
 
     /// <summary>

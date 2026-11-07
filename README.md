@@ -1,4 +1,4 @@
-# Apogee — Spaceflight Simulator (Android, Unity 6 + URP)
+# Apogee — Spaceflight Simulator (Android + macOS, Unity 6 + URP)
 
 A realistic 3D spaceflight simulator for Android, built in phases. This repository holds **Phase 1: Foundation** —
 the project, mobile rendering setup, main menu and a working modular rocket builder with live engineering analysis.
@@ -81,7 +81,11 @@ exists for that version, change it to another 6000.3.x release that has one and 
 | Save/load designs, 3 example rockets, crash-safe autosave | ✅ |
 | Settings: quality, resolution scale, frame rate, anti-aliasing, shadows, battery saver, FPS counter, volumes, camera sensitivity | ✅ Applied immediately and saved |
 | Procedural UI sounds and ambience | ✅ (engine and flight audio come with Phase 2) |
-| Launch button | ⏳ Disabled and labelled "Phase 2" |
+| **Launch & flight (Phase 2)** | ✅ Launch pad, real thrust/fuel/mass flow, staging into falling debris, drag, gravity turn, parachutes, landing / splashdown / crash, explosions |
+| Flight controls | ✅ Throttle slider, engine On/Off, rotate ◀ ▶ (hold), STAGE, time warp, map view with predicted orbit + Ap/Pe, pause menu, revert, recover. Keyboard on Mac: A/D rotate, W/S throttle, Z/X full/cut, Space stage, M map, , . warp |
+| Flight visuals | ✅ Curved Earth surface with oceans/land along the flight plane, launch complex, clouds, sky fading to black, stars, atmosphere glow from orbit, procedural exhaust plumes (expand in vacuum), smoke, shake, engine audio |
+| 2D build mode | ✅ Blueprint-style side view: drag parts from the list, drag parts on the rocket to move them, drop on the list to delete |
+| Part icons | ✅ Rendered from each part's real 3D model |
 
 **Physics model.** The world is full-scale: Earth radius 6,371 km, μ = 3.986×10¹⁴ m³/s², and an exponential atmosphere.
 Engines have separate sea-level and vacuum thrust/Isp with constant mass flow. Δv uses Tsiolkovsky, integrated across
@@ -92,7 +96,7 @@ ascent Δv. Example results: *Meridian Orbital* has 10.4 km/s of vacuum Δv and 
 *Pathfinder I* reaches ≈138 km.
 
 ## Not done yet (by phase)
-- **Phase 2 — Flight:** launch scene and pad, countdown, rigid-body flight with thrust, drag and gravity, staging execution, throttle and attitude controls, flight cameras, telemetry, engine VFX and audio.
+- **Phase 2 — Flight (remaining):** launch countdown, cockpit/chase camera options, re-entry heating.
 - **Phase 3 — Space:** floating-origin double-precision orbital integration, Earth and Moon at scale, navigation map, manoeuvre nodes, transfers.
 - **Phase 4 — Advanced:** interactive cockpit, astronaut EVA, docking, landing, reusable boosters.
 - **Phase 5 — Full game:** Mars and other planets, missions, career, stations, satellites.

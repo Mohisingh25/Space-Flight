@@ -22,7 +22,7 @@ namespace Apogee.Core
         public float cameraSensitivity = 1f;
         public bool showFps;
         public bool batterySaver;
-        public bool showBalanceMarkers = true;
+        public bool showBalanceMarkers;
 
         public event Action Changed;
 

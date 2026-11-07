@@ -18,10 +18,12 @@ namespace Apogee.EditorTools
     [InitializeOnLoad]
     public static class ProjectSetup
     {
-        public const string SetupVersion = "1";
+        public const string SetupVersion = "2";
         const string MarkerPath = "ProjectSettings/ApogeeSetup.txt";
         public const string MainMenuScene = "Assets/Scenes/MainMenu.unity";
         public const string BuilderScene = "Assets/Scenes/Builder.unity";
+        public const string FlightScene = "Assets/Scenes/Flight.unity";
+        public static readonly string[] AllScenes = { MainMenuScene, BuilderScene, FlightScene };
 
         static ProjectSetup()
         {
@@ -37,7 +39,7 @@ namespace Apogee.EditorTools
         public static bool IsComplete()
         {
             return File.Exists(MarkerPath) && File.ReadAllText(MarkerPath).Trim() == SetupVersion
-                && File.Exists(MainMenuScene) && File.Exists(BuilderScene)
+                && File.Exists(MainMenuScene) && File.Exists(BuilderScene) && File.Exists(FlightScene)
                 && File.Exists("Assets/Resources/Apogee/PartLit.mat");
         }
 
@@ -185,7 +187,7 @@ namespace Apogee.EditorTools
             if (lit == null) lit = Shader.Find("Standard");
             Mat("PartLit", lit, false);
             Mat("PartLitEmissive", lit, true);
-            foreach (var n in new[] { "Planet", "Atmosphere", "Stars", "Ghost", "Marker" })
+            foreach (var n in new[] { "Planet", "Atmosphere", "Stars", "Ghost", "Marker", "Flame", "Smoke", "VertexColor", "Ground" })
             {
                 var s = Shader.Find("Apogee/" + n);
                 if (s == null) { Debug.LogError("[Apogee] Shader Apogee/" + n + " missing."); continue; }
@@ -218,10 +220,12 @@ namespace Apogee.EditorTools
         {
             CreateScene(MainMenuScene, typeof(Apogee.Menu.MainMenuController));
             CreateScene(BuilderScene, typeof(Apogee.Builder.BuilderController));
+            CreateScene(FlightScene, typeof(Apogee.Flight.FlightController));
             EditorBuildSettings.scenes = new[]
             {
                 new EditorBuildSettingsScene(MainMenuScene, true),
-                new EditorBuildSettingsScene(BuilderScene, true)
+                new EditorBuildSettingsScene(BuilderScene, true),
+                new EditorBuildSettingsScene(FlightScene, true)
             };
         }
 
@@ -258,6 +262,15 @@ namespace Apogee.EditorTools
             PlayerSettings.allowedAutorotateToLandscapeRight = true;
             PlayerSettings.colorSpace = ColorSpace.Linear;
             PlayerSettings.Android.renderOutsideSafeArea = true;
+
+            // macOS / desktop: Mono backend (builds on GitHub's Linux machines), resizable window
+            var standalone = NamedBuildTarget.Standalone;
+            PlayerSettings.SetApplicationIdentifier(standalone, "com.apogeesim.spaceflight");
+            PlayerSettings.SetScriptingBackend(standalone, ScriptingImplementation.Mono2x);
+            PlayerSettings.fullScreenMode = FullScreenMode.Windowed;
+            PlayerSettings.defaultScreenWidth = 1600;
+            PlayerSettings.defaultScreenHeight = 900;
+            PlayerSettings.resizableWindow = true;
 
             // Make sure the classic Input Manager is enabled (the game reads touches through it).
             try

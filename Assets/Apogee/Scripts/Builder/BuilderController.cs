@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Apogee.Core;
 using Apogee.Parts;
+using Apogee.Rendering;
 using Apogee.Rocket;
 using Apogee.UI;
 using UnityEngine;
@@ -57,6 +58,11 @@ namespace Apogee.Builder
 
         // pointer state
         bool pointerActive, pointerMoved, multiTouch, pointerIsTouch;
+        int pointerId = -1;
+        int pressedPartUid = -1;
+        bool dragMoveActive;
+        GameObject envRoot, gridBackground;
+        public bool Mode2D { get; private set; }
         Vector2 pointerStart, lastMouse;
         float pointerStartTime;
 
@@ -68,7 +74,8 @@ namespace Apogee.Builder
             Screen.sleepTimeout = SleepTimeout.NeverSleep;
 
             Light sun;
-            BuilderEnvironment.Build(out sun);
+            envRoot = BuilderEnvironment.Build(out sun);
+            gridBackground = BuildGrid();
             var camGo = new GameObject("Builder Camera");
             cam = camGo.AddComponent<OrbitCamera>();
             cam.sensitivity = settings.cameraSensitivity;
@@ -218,16 +225,30 @@ namespace Apogee.Builder
             pointerStart = pos;
             pointerMoved = false;
             pointerIsTouch = touch;
+            pointerId = touch && Input.touchCount > 0 ? Input.GetTouch(0).fingerId : -1;
             pointerStartTime = Time.unscaledTime;
-            if (IsHolding) UpdateHeldPointer(pos, touch);
+            dragMoveActive = false;
+            pressedPartUid = -1;
+            if (IsHolding) { UpdateHeldPointer(pos, touch); return; }
+            // In 2D mode, pressing on a part and dragging picks it up (like Spaceflight Simulator).
+            if (Mode2D) pressedPartUid = PartAt(pos);
         }
 
         void PointerMove(Vector2 pos, Vector2 delta)
         {
             if (!pointerActive) return;
             if ((pos - pointerStart).magnitude > TapSlop) pointerMoved = true;
-            if (IsHolding) UpdateHeldPointer(pos, pointerIsTouch);
-            else if (pointerMoved && !multiTouch) cam.Rotate(delta);
+            if (IsHolding) { UpdateHeldPointer(pos, pointerIsTouch); return; }
+            if (pointerMoved && !multiTouch)
+            {
+                if (pressedPartUid >= 0)
+                {
+                    int uid = pressedPartUid;
+                    pressedPartUid = -1;
+                    if (BeginDragMove(uid)) { UpdateHeldPointer(pos, pointerIsTouch); return; }
+                }
+                cam.Rotate(delta); // pans in 2D mode
+            }
         }
 
         void PointerUp(Vector2 pos)
@@ -237,11 +258,129 @@ namespace Apogee.Builder
             if (multiTouch) return;
             if (IsHolding)
             {
+                if (dragMoveActive && OverUI(pointerId))
+                {
+                    // Dropped back on the parts panel: delete it.
+                    dragMoveActive = false;
+                    held = null;
+                    view.ClearGhost();
+                    view.ShowNodes(null, 0f);
+                    audioMgr.Play(Sfx.Detach);
+                    dialogs.Toast("Part removed. Undo brings it back.", Theme.Muted, 2f);
+                    if (HoldChanged != null) HoldChanged();
+                    Refresh();
+                    return;
+                }
                 UpdateHeldPointer(pos, pointerIsTouch);
-                if (!TryPlace()) PlacementHint();
+                if (!TryPlace())
+                {
+                    if (dragMoveActive)
+                    {
+                        // Not dropped on a node: put the part back where it was.
+                        dragMoveActive = false;
+                        held = null;
+                        view.ClearGhost();
+                        view.ShowNodes(null, 0f);
+                        Undo();
+                        if (HoldChanged != null) HoldChanged();
+                        PlacementHint();
+                    }
+                    else PlacementHint();
+                }
+                dragMoveActive = false;
                 return;
             }
             if (!pointerMoved && Time.unscaledTime - pointerStartTime < 0.45f) TapSelect(pos);
+        }
+
+        int PartAt(Vector2 pos)
+        {
+            var ray = cam.Cam.ScreenPointToRay(pos);
+            RaycastHit hit;
+            if (Physics.Raycast(ray, out hit, 3000f, 1 << RocketView.PartLayer))
+            {
+                var pv = hit.collider.GetComponent<PartView>();
+                if (pv != null) return pv.uid;
+            }
+            return -1;
+        }
+
+        /// <summary>Picks a part up off the rocket for dragging. The root part (which holds everything) can't be lifted.</summary>
+        bool BeginDragMove(int uid)
+        {
+            var p = Bp.Find(uid);
+            if (p == null) return false;
+            if (p.mode == AttachMode.Root && Bp.parts.Count > 1) return false;
+            PushUndo();
+            string error;
+            var h = RocketAssembly.Detach(Bp, uid, out error);
+            if (h == null) { undo.RemoveAt(undo.Count - 1); return false; }
+            Refresh();
+            audioMgr.Play(Sfx.Detach, 0.6f);
+            StartHold(h, false);
+            dragMoveActive = true;
+            return true;
+        }
+
+        // ------------------------------------------------------------------ 2D / 3D
+
+        GameObject BuildGrid()
+        {
+            var mat = MaterialLibrary.Custom("Ground");
+            mat.SetTexture("_MainTex", BlueprintTexture());
+            mat.SetTextureScale("_MainTex", new Vector2(100f, 100f));
+            mat.SetFloat("_Detail", 1f);
+            mat.SetFloat("_Light", 0.8f);
+            var m = new Mesh { name = "Grid" };
+            m.SetVertices(new List<Vector3> { new Vector3(-200, -40, 15), new Vector3(200, -40, 15), new Vector3(200, 360, 15), new Vector3(-200, 360, 15) });
+            m.SetUVs(0, new List<Vector2> { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) });
+            var c = new Color(0.55f, 0.7f, 1f);
+            m.SetColors(new List<Color> { c, c, c, c });
+            m.SetTriangles(new List<int> { 0, 2, 1, 0, 3, 2 }, 0);
+            m.RecalculateBounds();
+            var go = new GameObject("Blueprint Grid");
+            go.AddComponent<MeshFilter>().sharedMesh = m;
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+            go.SetActive(false);
+            return go;
+        }
+
+        static Texture2D BlueprintTexture()
+        {
+            int s = 64;
+            var px = new Color32[s * s];
+            for (int y = 0; y < s; y++)
+                for (int x = 0; x < s; x++)
+                {
+                    bool major = x == 0 || y == 0;
+                    bool minor = x % 16 == 0 || y % 16 == 0;
+                    byte v = major ? (byte)150 : minor ? (byte)112 : (byte)92;
+                    px[y * s + x] = new Color32((byte)(v * 0.42f), (byte)(v * 0.62f), v, 255);
+                }
+            var t = new Texture2D(s, s, TextureFormat.RGBA32, true);
+            t.SetPixels32(px);
+            t.wrapMode = TextureWrapMode.Repeat;
+            t.filterMode = FilterMode.Bilinear;
+            t.Apply();
+            return t;
+        }
+
+        public void ToggleMode2D()
+        {
+            Mode2D = !Mode2D;
+            cam.SetMode2D(Mode2D);
+            cam.Cam.backgroundColor = Mode2D ? new Color(0.14f, 0.27f, 0.48f) : new Color(0.12f, 0.13f, 0.15f);
+            gridBackground.SetActive(Mode2D);
+            for (int i = 0; i < envRoot.transform.childCount; i++)
+            {
+                var ch = envRoot.transform.GetChild(i).gameObject;
+                if (ch.GetComponent<Light>() != null || ch.GetComponent<ReflectionProbe>() != null) continue;
+                ch.SetActive(!Mode2D);
+            }
+            RenderSettings.fog = !Mode2D;
+            cam.Frame(view.WorldBounds);
+            dialogs.Toast(Mode2D ? "2D build mode: drag parts to move them, drop on the parts list to delete." : "3D build mode", Theme.Accent, 2.4f);
+            if (Changed != null) Changed();
         }
 
         void TapSelect(Vector2 pos)
@@ -412,6 +551,12 @@ namespace Apogee.Builder
         Vector3 FreePoint(Vector2 sp)
         {
             var ray = cam.Cam.ScreenPointToRay(sp);
+            if (Mode2D)
+            {
+                var p2 = ray.origin + ray.direction * ((0f - ray.origin.z) / (Mathf.Abs(ray.direction.z) > 1e-5f ? ray.direction.z : 1e-5f));
+                p2.y = Mathf.Max(p2.y, BuilderEnvironment.PadTop + 0.5f);
+                return p2;
+            }
             var fwd = cam.transform.forward;
             fwd.y = 0f;
             if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.forward;
@@ -422,6 +567,11 @@ namespace Apogee.Builder
             return p;
         }
 
+        /// <summary>
+        /// Finds where the held part would attach. The ghost is centred on the (lifted) pointer, and we compare
+        /// the ghost's own top/bottom nodes with every free node on the rocket, so long parts snap naturally
+        /// when their ends meet. Surface (radial) attachment uses a ray hit on the part under the pointer.
+        /// </summary>
         AttachCandidate FindCandidate(Vector2 sp)
         {
             var none = new AttachCandidate();
@@ -442,16 +592,20 @@ namespace Apogee.Builder
             float bestD = float.MaxValue;
             if (RocketAssembly.CanStack(def))
             {
+                Vector3 p = FreePoint(sp);
+                var dims = PartDims.Of(held.Root);
+                Vector3 heldTop = p + Vector3.up * dims.height * 0.5f;
+                Vector3 heldBottom = p - Vector3.up * dims.height * 0.5f;
                 foreach (var c in stackCandidates)
                 {
-                    var s = cam.Cam.WorldToScreenPoint(view.ToWorld(c.nodePosition));
-                    if (s.z < 0f) continue;
-                    float dist = (new Vector2(s.x, s.y) - sp).magnitude;
+                    Vector3 node = view.ToWorld(c.nodePosition);
+                    Vector3 mine = c.mode == AttachMode.Below ? heldTop : c.mode == AttachMode.Above ? heldBottom : p;
+                    float dist = c.mode == AttachMode.Side ? Mathf.Max(0f, Vector3.Distance(mine, node) - dims.Radius) : Vector3.Distance(mine, node);
                     if (dist < bestD) { bestD = dist; best = c; }
                 }
             }
-            float threshold = Screen.height * 0.1f;
-            if (best.valid && bestD < threshold && (!surface.valid || bestD < threshold * 0.5f)) return best;
+            float threshold = Mathf.Max(1.2f, cam.ViewHeight * (Mode2D ? 0.12f : 0.09f));
+            if (best.valid && bestD < threshold && (!surface.valid || bestD < threshold * 0.4f)) return best;
             if (surface.valid) return surface;
             return none;
         }
@@ -567,13 +721,58 @@ namespace Apogee.Builder
             dialogs.Toast("Picked up " + h.parts.Count + (h.parts.Count == 1 ? " part" : " parts") + ". Drag it to a new spot.", Theme.Accent, 2.2f);
         }
 
+        /// <summary>Copies the selected part (with anything attached to it). Stack parts are attached straight away
+        /// to the nearest free node — usually right below the original; radial parts are handed to you to place.</summary>
         public void DuplicateSelected()
         {
             var p = Selected;
             if (p == null) return;
             var h = RocketAssembly.CopySubtree(Bp, p.uid);
+            if (RocketAssembly.CanStack(h.Root.Def) && h.Root.Def.hasTopNode)
+            {
+                PartPose pose;
+                poses.TryGetValue(p.uid, out pose);
+                Vector3 bottom = RocketLayout.BottomNode(p, pose), top = RocketLayout.TopNode(p, pose);
+                var cands = RocketAssembly.StackCandidates(Bp, poses, h.Root.Def);
+                var best = new AttachCandidate();
+                float bestScore = float.MaxValue;
+                foreach (var c in cands)
+                {
+                    if (c.mode == AttachMode.Side) continue;
+                    float score = c.mode == AttachMode.Below ? Vector3.Distance(c.nodePosition, bottom) : Vector3.Distance(c.nodePosition, top) + 0.5f;
+                    if (score < bestScore) { bestScore = score; best = c; }
+                }
+                if (best.valid)
+                {
+                    PushUndo();
+                    var roots = RocketAssembly.Attach(Bp, h, best);
+                    if (roots.Count > 0)
+                    {
+                        audioMgr.Play(Sfx.Snap);
+                        Refresh();
+                        Select(roots[0]);
+                        dialogs.Toast("Duplicated " + p.Def.displayName + ".", Theme.Good, 1.6f);
+                        return;
+                    }
+                    undo.RemoveAt(undo.Count - 1);
+                }
+            }
             StartHold(h, false);
             dialogs.Toast("Copy ready — drag it onto the rocket.", Theme.Accent, 2f);
+        }
+
+        /// <summary>Hands the design to the flight scene.</summary>
+        public void Launch()
+        {
+            CancelHold();
+            if (Bp.IsEmpty) { audioMgr.Play(Sfx.Error); dialogs.Toast("Build a rocket first.", Theme.Warn); return; }
+            bool engine = false;
+            foreach (var q in Bp.parts) if (q.Def.IsEngine) engine = true;
+            if (!engine) { audioMgr.Play(Sfx.Error); dialogs.Toast("Add an engine before launching.", Theme.Warn); return; }
+            StagingSystem.Restage(Bp);
+            SaveSystem.Autosave(Bp);
+            Session.flightBlueprint = Bp.DeepCopy();
+            AppRoot.Instance.LoadScene(Scenes.Flight);
         }
 
         public void DeleteSelected()
