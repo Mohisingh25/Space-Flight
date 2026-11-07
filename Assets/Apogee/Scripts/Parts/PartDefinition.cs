@@ -41,7 +41,12 @@ namespace Apogee.Parts
         NavComputer,
         DockingPort,
         CargoModule,
-        ScienceInstrument
+        ScienceInstrument,
+        Wheel,
+        Girder,
+        StructuralPanel,
+        HeatShield,
+        RadialChute
     }
 
     /// <summary>Paint / material scheme used to build a part's look.</summary>
@@ -109,6 +114,10 @@ namespace Apogee.Parts
         public bool isFairing;
         public bool isLeg;
         public bool isPayload;             // carries an adjustable payload mass
+        public bool isWheel;               // rolling landing gear (counts as landing support)
+        public bool isDockingPort;         // tap in flight to undock everything beyond it
+        public float chuteScale = 1f;      // canopy size relative to the standard main chute
+        public float legReach = 1f;        // how far a landing leg extends below its mount, as a fraction of its height
 
         // Aerodynamics
         public float dragCoefficient = 0.8f;
@@ -122,6 +131,12 @@ namespace Apogee.Parts
         public bool IsEngine { get { return thrustVac > 0f && !isRcs; } }
         public bool HasFuel { get { return fuelMass > 0f; } }
         public bool IsStaged { get { return IsEngine || isDecoupler || isParachute || isFairing; } }
+
+        /// <summary>Legs and solar arrays can be folded and unfolded in flight.</summary>
+        public bool Foldable { get { return isLeg || solarKW > 0f; } }
+
+        /// <summary>Paintable: the part has a painted body (not bare metal fittings like radial gear).</summary>
+        public bool Paintable { get { return !isRcs && shape != PartShape.SolarPanel && shape != PartShape.Antenna; } }
 
         public string ShortStats()
         {

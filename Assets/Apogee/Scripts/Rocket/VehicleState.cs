@@ -114,7 +114,7 @@ namespace Apogee.Rocket
             }
             float sum = 0f;
             foreach (var kv in fuel)
-                if (alive.Contains(kv.Key) && !byUid[kv.Key].Def.solidFuel && groups[kv.Key] == key) sum += kv.Value;
+                if (alive.Contains(kv.Key) && IsLiquid(kv.Key) && groups[kv.Key] == key) sum += kv.Value;
             return sum;
         }
 
@@ -132,9 +132,16 @@ namespace Apogee.Rocket
             var keys = new List<int>(fuel.Keys);
             foreach (int u in keys)
             {
-                if (!alive.Contains(u) || byUid[u].Def.solidFuel || groups[u] != key) continue;
+                if (!alive.Contains(u) || !IsLiquid(u) || groups[u] != key) continue;
                 fuel[u] = Mathf.Max(0f, fuel[u] - amount * fuel[u] / total);
             }
+        }
+
+        /// <summary>Main-engine liquid propellant (not solid motors, not RCS monopropellant).</summary>
+        public bool IsLiquid(int uid)
+        {
+            var d = byUid[uid].Def;
+            return !d.solidFuel && !d.isRcs;
         }
 
         public List<int> ActiveEngines(Dictionary<int, int> groups)

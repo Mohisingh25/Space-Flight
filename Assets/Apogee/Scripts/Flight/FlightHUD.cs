@@ -29,7 +29,11 @@ namespace Apogee.Flight
     /// </summary>
     public class FlightHUD : MonoBehaviour
     {
-        public HoldButton left, right;
+        public HoldButton left, right, rcsUp, rcsDown, rcsLeft, rcsRight;
+        public Button insideButton, rcsButton;
+        public RectTransform rcsPad;
+        public Text cheatBadge;
+        public Action OnInside, OnRcs;
         public Slider throttle;
         public Button engineButton, stageButton, mapButton, warpUp, warpDown, menuButton;
         public Text telemetry, throttleLabel, warpLabel, message, stageLabel, hint;
@@ -53,6 +57,15 @@ namespace Apogee.Flight
             UIFactory.Place((RectTransform)menuButton.transform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(20, -18), new Vector2(150, 84));
             mapButton = UIFactory.Button(root, "Map", () => { if (OnMap != null) OnMap(); });
             UIFactory.Place((RectTransform)mapButton.transform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(182, -18), new Vector2(150, 84));
+
+            // ---- under them: inside view + RCS
+            insideButton = UIFactory.Button(root, "Inside", () => { if (OnInside != null) OnInside(); }, ButtonStyle.Normal, 24);
+            UIFactory.Place((RectTransform)insideButton.transform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(20, -114), new Vector2(150, 70));
+            rcsButton = UIFactory.Button(root, "RCS", () => { if (OnRcs != null) OnRcs(); }, ButtonStyle.Normal, 24);
+            UIFactory.Place((RectTransform)rcsButton.transform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(182, -114), new Vector2(150, 70));
+            cheatBadge = UIFactory.Label(root, "CHEATS ON", 20, Theme.Bad, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UIFactory.Place(cheatBadge.rectTransform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(24, -192), new Vector2(400, 34));
+            cheatBadge.gameObject.SetActive(false);
 
             // ---- top-right: warp + telemetry
             warpDown = UIFactory.Button(root, "<<", () => { if (OnWarpDown != null) OnWarpDown(); }, ButtonStyle.Normal, 34);
@@ -94,6 +107,20 @@ namespace Apogee.Flight
             // ---- bottom centre: rotation
             left = Hold(controlsGroup, "◀", new Vector2(-110, 30));
             right = Hold(controlsGroup, "▶", new Vector2(110, 30));
+
+            // RCS translation pad (shown while RCS is on): pushes the craft without turning it.
+            rcsPad = UIFactory.Rect("RcsPad", controlsGroup);
+            rcsPad.anchorMin = rcsPad.anchorMax = new Vector2(0.5f, 0f);
+            rcsPad.pivot = new Vector2(0.5f, 0f);
+            rcsPad.sizeDelta = new Vector2(300, 220);
+            rcsPad.anchoredPosition = new Vector2(0, 175);
+            rcsUp = SmallHold(rcsPad, "▲", new Vector2(0, 150));
+            rcsDown = SmallHold(rcsPad, "▼", new Vector2(0, 0));
+            rcsLeft = SmallHold(rcsPad, "◀", new Vector2(-100, 75));
+            rcsRight = SmallHold(rcsPad, "▶", new Vector2(100, 75));
+            var rl = UIFactory.Label(rcsPad, "RCS", 18, Theme.Accent, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UIFactory.Place(rl.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0, 95), new Vector2(90, 30));
+            rcsPad.gameObject.SetActive(false);
 
             // ---- bottom left: staging and fuel
             stageButton = UIFactory.Button(controlsGroup, "STAGE", () => { if (OnStage != null) OnStage(); }, ButtonStyle.Primary, 34);
@@ -138,6 +165,16 @@ namespace Apogee.Flight
             img.sprite = UIFactory.RoundedSmall;
             UIFactory.Place(img.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0), pos, new Vector2(190, 130));
             var t = UIFactory.Label(img.transform, label, 56, Theme.Text, TextAnchor.MiddleCenter);
+            UIFactory.Stretch(t.rectTransform);
+            return img.gameObject.AddComponent<HoldButton>();
+        }
+
+        HoldButton SmallHold(RectTransform parent, string label, Vector2 pos)
+        {
+            var img = UIFactory.Panel(parent, new Color(0.1f, 0.16f, 0.22f, 0.85f), true, "Rcs" + label);
+            img.sprite = UIFactory.RoundedSmall;
+            UIFactory.Place(img.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0), pos, new Vector2(92, 66));
+            var t = UIFactory.Label(img.transform, label, 30, Theme.Accent, TextAnchor.MiddleCenter);
             UIFactory.Stretch(t.rectTransform);
             return img.gameObject.AddComponent<HoldButton>();
         }

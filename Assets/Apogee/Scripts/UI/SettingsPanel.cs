@@ -32,8 +32,18 @@ namespace Apogee.UI
 
             UIFactory.Header(c, "Controls");
             UIFactory.SliderRow(c, "Camera sensitivity", 0.3f, 2.5f, s.cameraSensitivity, v => { s.cameraSensitivity = v; s.Save(); }, v => v.ToString("0.0") + "×");
-            var ctl = UIFactory.Label(c, "Flight controls (joystick, throttle, RCS) arrive with the flight systems in Phase 2, and their sensitivity settings will appear here.", 19, Theme.Muted);
+            var ctl = UIFactory.Label(c, "In flight, tap any part: engines start/stop one by one, legs and solar arrays fold, parachutes deploy, decouplers and docking ports separate.", 19, Theme.Muted);
             UIFactory.Size(ctl, -1, 52);
+
+            UIFactory.Header(c, "Cheats");
+            var warn = UIFactory.Label(c, "Off = real physics. Cheats apply only while the master switch is on.", 19, Theme.Muted);
+            UIFactory.Size(warn, -1, 34);
+            UIFactory.ToggleRow(c, "Enable cheats", s.cheatsEnabled, on => { s.cheatsEnabled = on; s.Save(); });
+            UIFactory.ToggleRow(c, "Unlimited fuel", s.cheatInfiniteFuel, on => { s.cheatInfiniteFuel = on; s.Save(); });
+            UIFactory.ToggleRow(c, "Zero gravity", s.cheatNoGravity, on => { s.cheatNoGravity = on; s.Save(); });
+            UIFactory.ToggleRow(c, "No air drag", s.cheatNoDrag, on => { s.cheatNoDrag = on; s.Save(); });
+            UIFactory.ToggleRow(c, "Unbreakable parts (no crashes)", s.cheatUnbreakable, on => { s.cheatUnbreakable = on; s.Save(); });
+            UIFactory.ToggleRow(c, "Super thrust (5× engines)", s.cheatSuperThrust, on => { s.cheatSuperThrust = on; s.Save(); });
 
             UIFactory.Header(c, "Language");
             var lang = UIFactory.Label(c, "English (more languages planned)", 24, Theme.Text);

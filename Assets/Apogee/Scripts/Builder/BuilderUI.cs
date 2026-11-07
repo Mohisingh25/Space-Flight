@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Text;
 using Apogee.Core;
 using Apogee.Parts;
+using Apogee.Rendering;
 using Apogee.Rocket;
 using Apogee.UI;
 using UnityEngine;
@@ -60,7 +61,9 @@ namespace Apogee.Builder
         RectTransform root;
 
         // top bar
-        Button nameButton, undoButton, redoButton, symButton, stagingButton, modeButton;
+        Button nameButton, undoButton, redoButton, symButton, stagingButton, modeButton, insideButton;
+        bool paletteOpen;
+        int paletteFor = -1;
 
         // parts
         PartCategory category = PartCategory.Command;
@@ -164,6 +167,8 @@ namespace Apogee.Builder
             UIFactory.Size(stagingButton, 140);
             modeButton = UIFactory.Button(row, "2D", c.ToggleMode2D);
             UIFactory.Size(modeButton, 100);
+            insideButton = UIFactory.Button(row, "Inside", c.ToggleInside);
+            UIFactory.Size(insideButton, 120);
             UIFactory.Size(UIFactory.Button(row, "New", c.NewDesign), 100);
             UIFactory.Size(UIFactory.Button(row, "Open", c.OpenLoadDialog), 100);
             UIFactory.Size(UIFactory.Button(row, "Save", c.Save), 110);
@@ -196,6 +201,7 @@ namespace Apogee.Builder
             symButton = UIFactory.Button(r2, "Sym ×1", c.CycleSymmetry, ButtonStyle.Normal, 22);
             stagingButton = UIFactory.Button(r2, "Stages", () => { c.StagingOpen = !c.StagingOpen; Refresh(); }, ButtonStyle.Normal, 22);
             modeButton = UIFactory.Button(r2, "2D", c.ToggleMode2D, ButtonStyle.Normal, 22);
+            insideButton = UIFactory.Button(r2, "Inside", c.ToggleInside, ButtonStyle.Normal, 22);
             UIFactory.Button(r2, "New", c.NewDesign, ButtonStyle.Normal, 22);
             UIFactory.Button(r2, "Open", c.OpenLoadDialog, ButtonStyle.Normal, 22);
             UIFactory.Button(r2, "Save", c.Save, ButtonStyle.Normal, 22);
@@ -344,7 +350,7 @@ namespace Apogee.Builder
             if (s == null || s.partCount == 0) { summaryText.text = "<color=#8fa3b8>Add parts to see mass, TWR and Δv.</color>"; return; }
             string twrCol = !s.hasThrust ? "#8fa3b8" : s.launchTwr >= 1.2f ? "#5fd38d" : s.launchTwr >= 1f ? "#f0c048" : "#ff6b6b";
             summaryText.text = "Mass <b>" + s.totalMass.ToString("N1") + " t</b>   TWR <b><color=" + twrCol + ">" + (s.hasThrust ? s.launchTwr.ToString("0.00") : "—") + "</color></b>\n" +
-                "Δv <b><color=#7fd4ff>" + s.dvVacTotal.ToString("N0") + " m/s</color></b>   Thrust <b>" + s.launchThrustAsl.ToString("N0") + " kN</b>";
+                "Δv <b><color=#7fd4ff>" + s.dvVacTotal.ToString("N0") + " m/s</color></b>   Lifts <b>" + (s.launchThrustAsl / 9.80665f).ToString("N0") + " t</b>";
         }
 
         void BuildBottomBars()
@@ -420,6 +426,7 @@ namespace Apogee.Builder
             UIFactory.SetLabel(holdSymButton, "Symmetry ×" + c.Symmetry);
             UIFactory.SetButtonColor(stagingButton, c.StagingOpen ? Theme.ButtonPrimary : Theme.ButtonBg);
             UIFactory.SetLabel(modeButton, c.Mode2D ? "3D" : "2D");
+            UIFactory.SetButtonColor(insideButton, c.InsideView ? Theme.ButtonPrimary : Theme.ButtonBg);
 
             emptyHint.gameObject.SetActive(c.Bp.IsEmpty && !c.IsHolding);
             holdBar.gameObject.SetActive(c.IsHolding);
@@ -428,8 +435,8 @@ namespace Apogee.Builder
                 var def = c.Held.Root.Def;
                 string extra = c.Held.parts.Count > 1 ? " (+" + (c.Held.parts.Count - 1) + " attached)" : "";
                 holdText.text = "<b>" + def.displayName + "</b>" + extra + "\n<size=20><color=#8fa3b8>" +
-                    (c.Bp.IsEmpty ? "Tap the platform to place it." : def.radialMount && !RocketAssembly.CanStack(def) ? "Drag onto the side of a part. Symmetry places copies around it." : "Drag to a green node. Release to attach.") + "</color></size>";
-                holdSymButton.gameObject.SetActive(def.radialMount);
+                    (c.Bp.IsEmpty ? "Tap the platform to place it." : def.radialMount && !RocketAssembly.CanStack(def) ? "Drag onto the side of a part. Symmetry places copies around it." : "Drag to a green node, or beside a tank to attach it to the side.") + "</color></size>";
+                holdSymButton.gameObject.SetActive(def.radialMount || RocketAssembly.CanStack(def));
             }
 
             stagingDrawer.gameObject.SetActive(c.StagingOpen && !c.IsHolding);
@@ -484,12 +491,17 @@ namespace Apogee.Builder
                 tools.Add(new KeyValuePair<string, System.Action>("Longer", () => c.StretchSelected(+1)));
                 tools.Add(new KeyValuePair<string, System.Action>("Shorter", () => c.StretchSelected(-1)));
             }
+            if (paletteFor != p.uid) { paletteOpen = false; paletteFor = p.uid; }
+            if (def.Paintable) tools.Add(new KeyValuePair<string, System.Action>(paletteOpen ? "Paint ▲" : "Paint", () => { paletteOpen = !paletteOpen; Refresh(); }));
             tools.Add(new KeyValuePair<string, System.Action>("Duplicate", c.DuplicateSelected));
             tools.Add(new KeyValuePair<string, System.Action>("Delete", c.DeleteSelected));
 
             int perRow = portrait ? 4 : tools.Count;
             int rows = (tools.Count + perRow - 1) / perRow;
-            if (portrait) BottomRegion(selectionBar, h + 28f + (rows - 1) * 76f, lift);
+            bool showPalette = paletteOpen && def.Paintable;
+            float paletteH = showPalette ? 150f : 0f;
+            if (portrait) BottomRegion(selectionBar, h + 28f + (rows - 1) * 76f + paletteH, lift);
+            else if (showPalette) BottomRegion(selectionBar, h + paletteH, lift);
             for (int r = 0; r < rows; r++)
             {
                 var row = UIFactory.Rect("Tools" + r, selectionBody);
@@ -499,7 +511,7 @@ namespace Apogee.Builder
                 for (int i = r * perRow; i < Mathf.Min(tools.Count, (r + 1) * perRow); i++)
                 {
                     bool del = tools[i].Key == "Delete";
-                    UIFactory.Button(row, tools[i].Key, tools[i].Value, del ? ButtonStyle.Danger : ButtonStyle.Normal, portrait ? 22 : 26);
+                    UIFactory.Button(row, tools[i].Key, tools[i].Value, del ? ButtonStyle.Danger : ButtonStyle.Normal, portrait ? 22 : tools.Count > 7 ? 21 : 26);
                 }
                 // keep the last row's buttons the same width as full rows
                 if (portrait) for (int k = tools.Count; k < (r + 1) * perRow && r == rows - 1; k++)
@@ -509,6 +521,8 @@ namespace Apogee.Builder
                 }
             }
 
+            if (showPalette) BuildPalette(p);
+
             if (def.isPayload)
             {
                 var slider = UIFactory.SliderRow(selectionBody, "Payload mass", 0f, 40f, p.payloadMass, v => c.SetPayload(v, false), v => v.ToString("0.0") + " t");
@@ -517,6 +531,28 @@ namespace Apogee.Builder
                 entry.callback.AddListener(e => c.SetPayload(slider.value, true));
                 trigger.triggers.Add(entry);
             }
+        }
+
+        /// <summary>Colour swatches for the selected part, plus "factory finish" and "paint whole rocket".</summary>
+        void BuildPalette(PartInstance p)
+        {
+            RectTransform swatches;
+            var sc = UIFactory.ScrollList(selectionBody, out swatches, 8, 0, true);
+            UIFactory.Size(sc, -1, 70);
+            for (int i = 0; i < PartPaint.Colors.Length; i++)
+            {
+                int idx = i;
+                var b = UIFactory.Button(swatches, "", () => c.PaintSelected(idx));
+                UIFactory.SetButtonColor(b, PartPaint.Colors[i]);
+                UIFactory.Size(b, 64, 62);
+                if (p.paint == i) UIFactory.SetLabel(b, "<color=#00000099>●</color>");
+            }
+            var row = UIFactory.Rect("PaintActions", selectionBody);
+            UIFactory.Size(row, -1, 62);
+            var hl = UIFactory.Horizontal(row, 8, 0, true);
+            hl.childForceExpandWidth = true;
+            UIFactory.Button(row, "Factory finish", () => c.PaintSelected(-1), ButtonStyle.Normal, 21);
+            UIFactory.Button(row, p.paint >= 0 ? "Paint whole rocket " + PartPaint.Names[p.paint] : "Reset whole rocket", () => c.PaintAll(p.paint), ButtonStyle.Normal, 21);
         }
 
         void RebuildStaging()
@@ -597,6 +633,8 @@ namespace Apogee.Builder
             Row("Launch thrust (vac)", s.launchThrustVac.ToString("N0") + " kN");
             Color twrCol = s.launchTwr >= 1.2f ? Theme.Good : s.launchTwr >= 1f ? Theme.Warn : Theme.Bad;
             Row("Launch TWR", s.hasThrust ? s.launchTwr.ToString("0.00") : "—", twrCol);
+            float liftT = s.launchThrustAsl / 9.80665f;
+            Row("Engines can lift", liftT.ToString("N1") + " t  (rocket " + s.totalMass.ToString("N1") + " t)", liftT > s.totalMass ? Theme.Good : Theme.Bad);
             Row("Δv vacuum", s.dvVacTotal.ToString("N0") + " m/s", Theme.Accent);
             Row("Δv sea level", s.dvAslTotal.ToString("N0") + " m/s");
 

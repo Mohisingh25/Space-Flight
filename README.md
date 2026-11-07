@@ -10,6 +10,18 @@ the project, mobile rendering setup, main menu and a working modular rocket buil
 
 ---
 
+## Phase 3A — building and flight controls
+
+- **Side attachment:** tanks, engines, boosters and girders snap to the side of other tanks (drop them beside a tank; symmetry ×2–×8). Side tanks crossfeed into the core. For boosters you want to drop, use a Radial Separator.
+- **New parts:** Mini Tank, Heavy Parachute, Radial Parachute (fits on any tank), Heavy Landing Leg, Rover Wheel, Heavy Wheel, Structural Girder, Structural Panel, Ablative Heat Shield, Aero Winglet. RCS blocks now carry monopropellant. Docking ports can be undocked.
+- **Paint:** select a part → Paint → 12 colours, factory finish, or paint the whole rocket.
+- **Bigger sizes:** diameters up to 7.5 m, tank lengths up to 8×.
+- **Inside view:** see-through hulls showing fuel (orange) and oxidiser (blue) tanks that drain in flight, solid-fuel grain, combustion chambers, crew in their seats and payload. "Inside" button in the builder and in flight (key V).
+- **Tap parts in flight:** each engine starts/stops on its own; landing legs fold/unfold; solar arrays open/stow; parachutes deploy; decouplers, docking ports and fairings separate; RCS blocks toggle RCS.
+- **RCS:** RCS button + 4-way pad to move the craft without turning it (keys I/J/K/L, R toggles).
+- **Real physics:** engines off the centreline twist the rocket; the builder shows how many tonnes the engines can lift versus the rocket's mass.
+- **Cheats (Settings → Cheats, off by default):** unlimited fuel, zero gravity, no air drag, unbreakable parts, 5× thrust.
+
 ## Orientation
 
 The game runs in **portrait and landscape** and re-lays out every screen when the phone rotates (auto-rotate; upside-down portrait is disabled). On Mac, resizing the window to taller-than-wide switches to the portrait layout.

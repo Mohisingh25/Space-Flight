@@ -11,10 +11,10 @@ namespace Apogee.Parts
     public static class PartCatalog
     {
         /// <summary>Standard diameters a resizable part can snap to (metres).</summary>
-        public static readonly float[] DiameterSteps = { 0.625f, 1.25f, 1.875f, 2.5f, 3.75f, 5.0f };
+        public static readonly float[] DiameterSteps = { 0.625f, 1.25f, 1.875f, 2.5f, 3.75f, 5.0f, 6.25f, 7.5f };
 
         /// <summary>Length multipliers available for stretchable tanks.</summary>
-        public static readonly float[] LengthSteps = { 0.5f, 0.75f, 1f, 1.5f, 2f, 3f, 4f };
+        public static readonly float[] LengthSteps = { 0.5f, 0.75f, 1f, 1.5f, 2f, 3f, 4f, 5f, 6f, 8f };
 
         // Propellant bulk density (kerolox mix ≈ 1.03 t/m³) times a usable fill fraction.
         const float PropellantPerCubicMetre = 0.95f;
@@ -125,6 +125,7 @@ namespace Apogee.Parts
             });
 
             // ---------------- Fuel tanks ----------------
+            Tank("tank_mini", "FT-0 Mini Tank", 0.625f, 0.8f, Finish.WhitePaint, "Tiny 0.625 m tank. Good as a side tank or for landers.");
             Tank("tank_s", "FT-1 Small Tank", 1.25f, 1.0f, Finish.WhitePaint, "Short 1.25 m kerosene/LOX tank.");
             Tank("tank_m", "FT-2 Medium Tank", 1.25f, 2.0f, Finish.WhitePaint, "Standard 1.25 m kerosene/LOX tank.");
             Tank("tank_l", "FT-4 Long Tank", 1.25f, 4.0f, Finish.BlackWhite, "Long 1.25 m tank with roll-pattern paint.");
@@ -196,7 +197,7 @@ namespace Apogee.Parts
                 description = "Four-nozzle cold-gas attitude thruster block. Mount radially in symmetry.",
                 category = PartCategory.Engines, shape = PartShape.RcsBlock, finish = Finish.WhitePaint,
                 diameter = 0.25f, topDiameter = 0.25f, height = 0.3f, dryMass = 0.04f,
-                thrustVac = 1f, thrustSL = 0.8f, ispVac = 240f, ispSL = 100f, isRcs = true,
+                thrustVac = 1f, thrustSL = 0.8f, ispVac = 240f, ispSL = 100f, isRcs = true, fuelMass = 0.03f,
                 radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
             });
 
@@ -280,7 +281,8 @@ namespace Apogee.Parts
                 id = "docking_port", displayName = "Docking Port",
                 description = "Androgynous docking ring for rendezvous with stations and other craft.",
                 category = PartCategory.Coupling, shape = PartShape.DockingPort,
-                diameter = 1.25f, topDiameter = 1.0f, height = 0.35f, dryMass = 0.05f
+                diameter = 1.25f, topDiameter = 1.0f, height = 0.35f, dryMass = 0.05f,
+                isDockingPort = true, acceptsRadial = true, resizableDiameter = true
             });
 
             // ---------------- Aero ----------------
@@ -349,6 +351,79 @@ namespace Apogee.Parts
                 category = PartCategory.Utility, shape = PartShape.CargoModule,
                 diameter = 2.5f, topDiameter = 2.5f, height = 3.0f, dryMass = 0.9f, isPayload = true,
                 acceptsRadial = true
+            });
+
+            Add(new PartDefinition
+            {
+                id = "parachute_heavy", displayName = "Heavy Parachute",
+                description = "Large main canopy for heavy capsules and recovering whole stages. Mount on any top node.",
+                category = PartCategory.Utility, shape = PartShape.Parachute,
+                diameter = 1.25f, topDiameter = 0.7f, height = 0.6f, dryMass = 0.3f, isParachute = true, chuteScale = 2.2f,
+                hasTopNode = false, radialMount = true, dragCoefficient = 0.5f, resizableDiameter = true
+            });
+            Add(new PartDefinition
+            {
+                id = "parachute_radial", displayName = "Radial Parachute",
+                description = "Side-mounted canopy. Put it on tanks, boosters or anything else — use 2-4 in symmetry.",
+                category = PartCategory.Utility, shape = PartShape.RadialChute,
+                diameter = 0.35f, topDiameter = 0.35f, height = 0.6f, dryMass = 0.08f, isParachute = true, chuteScale = 0.7f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "landing_legs_l", displayName = "Heavy Landing Leg",
+                description = "Long-travel leg for big landers and recoverable boosters. Tap it in flight to fold or deploy.",
+                category = PartCategory.Utility, shape = PartShape.LandingLegs,
+                diameter = 0.5f, topDiameter = 0.5f, height = 3.6f, dryMass = 0.35f, isLeg = true,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "wheel_s", displayName = "Rover Wheel",
+                description = "Sprung rover wheel. Works as landing gear; mount several around the bottom.",
+                category = PartCategory.Utility, shape = PartShape.Wheel, finish = Finish.DarkComposite,
+                diameter = 0.3f, topDiameter = 0.3f, height = 0.8f, dryMass = 0.07f, isWheel = true,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "wheel_l", displayName = "Heavy Wheel",
+                description = "Large wheel for heavy rovers and landing gear.",
+                category = PartCategory.Utility, shape = PartShape.Wheel, finish = Finish.DarkComposite,
+                diameter = 0.5f, topDiameter = 0.5f, height = 1.4f, dryMass = 0.2f, isWheel = true,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "girder", displayName = "Structural Girder",
+                description = "Square lattice beam. Stack it, or attach it to the side of tanks to build frames and outriggers.",
+                category = PartCategory.Structural, shape = PartShape.Girder, finish = Finish.DarkComposite,
+                diameter = 0.6f, topDiameter = 0.6f, height = 2.0f, dryMass = 0.12f,
+                resizableLength = true, acceptsRadial = true, scaleHeightWithDiameter = false
+            });
+            Add(new PartDefinition
+            {
+                id = "struct_panel", displayName = "Structural Panel",
+                description = "Flat aluminium plate for platforms, shields and frames.",
+                category = PartCategory.Structural, shape = PartShape.StructuralPanel,
+                diameter = 1.0f, topDiameter = 1.0f, height = 1.0f, dryMass = 0.05f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "heat_shield", displayName = "Ablative Heat Shield",
+                description = "Blunt ablative shield for re-entry. Mount under a capsule.",
+                category = PartCategory.Aero, shape = PartShape.HeatShield,
+                diameter = 2.5f, topDiameter = 2.5f, height = 0.35f, dryMass = 0.45f,
+                resizableDiameter = true, dragCoefficient = 0.95f
+            });
+            Add(new PartDefinition
+            {
+                id = "winglet", displayName = "Aero Winglet",
+                description = "Small delta fin for upper stages and boosters.",
+                category = PartCategory.Aero, shape = PartShape.Fins,
+                diameter = 0.08f, topDiameter = 0.08f, height = 1.0f, dryMass = 0.03f, finArea = 0.6f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
             });
 
             // ---------------- Science ----------------

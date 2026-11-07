@@ -10,7 +10,10 @@ namespace Apogee.Rocket
     {
         public int uid;
         public string[] materialKeys;
+        public Color[] baseColors;
         public MeshRenderer meshRenderer;
+        public int paint = -1;
+        public PartInstance part;
     }
 
     /// <summary>
@@ -123,10 +126,29 @@ namespace Apogee.Rocket
             }
             var view = go.AddComponent<PartView>();
             view.uid = p.uid;
+            view.part = p;
             view.materialKeys = model.materialKeys;
             view.meshRenderer = r;
+            if (!ghost)
+            {
+                view.paint = p.paint;
+                view.baseColors = PartPaint.Apply(r, model.materialKeys, p.paint, mpb);
+                if (xray) XRay.Apply(go, p, true);
+            }
             return view;
         }
+
+        bool xray;
+
+        /// <summary>See-through "inside view": hulls turn to glass and the internals (propellant, engines, crew seats) show.</summary>
+        public void SetXRay(bool on)
+        {
+            xray = on;
+            foreach (var v in views.Values)
+                if (v != null) XRay.Apply(v.gameObject, v.part, on);
+        }
+
+        public bool XRayOn { get { return xray; } }
 
         public PartView ViewOf(int uid)
         {
@@ -145,13 +167,14 @@ namespace Apogee.Rocket
                 for (int i = 0; i < v.materialKeys.Length; i++)
                 {
                     mpb.Clear();
-                    if (on)
+                    Color baseCol = v.baseColors != null && i < v.baseColors.Length ? v.baseColors[i] : MaterialLibrary.BaseColor(v.materialKeys[i]);
+                    if (on || (v.paint >= 0 && PartPaint.IsBodyKey(v.materialKeys[i])))
                     {
-                        Color c = Color.Lerp(MaterialLibrary.BaseColor(v.materialKeys[i]), tint, amount);
+                        Color c = on ? Color.Lerp(baseCol, tint, amount) : baseCol;
                         mpb.SetColor("_BaseColor", c);
                         mpb.SetColor("_Color", c);
                     }
-                    v.meshRenderer.SetPropertyBlock(mpb, i);
+                    if (!XRay.IsOn(v.gameObject)) v.meshRenderer.SetPropertyBlock(mpb, i);
                 }
             }
         }

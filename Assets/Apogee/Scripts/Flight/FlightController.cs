@@ -44,6 +44,14 @@ namespace Apogee.Flight
             launchBlueprint = Session.flightBlueprint ?? SaveSystem.LoadAutosave() ?? ExampleRockets.Meridian();
             if (launchBlueprint.IsEmpty) launchBlueprint = ExampleRockets.Meridian();
             vessel = new FlightVessel(launchBlueprint.DeepCopy());
+            if (settings.cheatsEnabled)
+            {
+                vessel.cheats.infiniteFuel = settings.cheatInfiniteFuel;
+                vessel.cheats.noGravity = settings.cheatNoGravity;
+                vessel.cheats.noDrag = settings.cheatNoDrag;
+                vessel.cheats.unbreakable = settings.cheatUnbreakable;
+                vessel.cheats.superThrust = settings.cheatSuperThrust;
+            }
 
             var camGo = new GameObject("Flight Camera");
             camGo.tag = "MainCamera";
@@ -68,6 +76,9 @@ namespace Apogee.Flight
             hud.OnWarpDown = () => SetWarp(warpIndex - 1, true);
             hud.OnMenu = OpenMenu;
             hud.OnThrottle = v => vessel.throttle = v;
+            hud.OnInside = ToggleInside;
+            hud.OnRcs = ToggleRcs;
+            hud.cheatBadge.gameObject.SetActive(vessel.cheats.Any);
 
             vessel.OnMessage += m => hud.Message(m);
             vessel.OnDebris += d => { world.AddDebris(d); AppRoot.Instance.Audio.Play(Sfx.Detach, 0.8f); };
@@ -80,7 +91,7 @@ namespace Apogee.Flight
             engineAudio.volume = 0f;
             engineAudio.Play();
 
-            hud.hint.text = "Press STAGE to ignite the engines";
+            hud.hint.text = "Press STAGE to ignite — or tap an engine to start just that one";
             Render();
         }
 
@@ -103,6 +114,69 @@ namespace Apogee.Flight
             if (!vessel.AnyEngineAvailable()) { hud.Message("No engine lit — press STAGE"); return; }
             vessel.enginesOn = !vessel.enginesOn;
             hud.Message(vessel.enginesOn ? "Engine On" : "Engine Off", 1.2f);
+            AppRoot.Instance.Audio.Play(Sfx.Click);
+        }
+
+        float preInsideDistance;
+
+        void ToggleInside()
+        {
+            bool on = !world.XRayOn;
+            world.SetXRay(on);
+            if (on) { preInsideDistance = camDistanceGoal; camDistanceGoal = Mathf.Clamp(vessel.length * 1.5f + 6f, 10f, 200f); }
+            else if (preInsideDistance > 0f) camDistanceGoal = preInsideDistance;
+            hud.Message(on ? "Inside view — orange: fuel · blue: oxidiser" : "Outside view", 1.8f);
+            AppRoot.Instance.Audio.Play(Sfx.Click);
+        }
+
+        void ToggleRcs()
+        {
+            if (!vessel.HasRcs) { hud.Message("No RCS thrusters on this craft — add an RCS Thruster Quad in the builder", 2.2f); return; }
+            vessel.rcsOn = !vessel.rcsOn;
+            hud.Message(vessel.rcsOn ? "RCS on — use the pad to translate" : "RCS off", 1.4f);
+            AppRoot.Instance.Audio.Play(Sfx.Click);
+        }
+
+        // ---- tapping parts
+        Vector2 tapStart;
+        float tapStartTime;
+        bool tapCandidate;
+
+        void DetectTap()
+        {
+            if (map.Active) { tapCandidate = false; return; }
+            bool down = false, up = false;
+            Vector2 pos = Vector2.zero;
+            if (Input.touchCount == 1)
+            {
+                var t = Input.GetTouch(0);
+                pos = t.position;
+                down = t.phase == TouchPhase.Began;
+                up = t.phase == TouchPhase.Ended;
+            }
+            else if (Input.touchCount == 0)
+            {
+                pos = Input.mousePosition;
+                down = Input.GetMouseButtonDown(0);
+                up = Input.GetMouseButtonUp(0);
+            }
+            else { tapCandidate = false; return; }
+
+            if (down) { tapCandidate = !OverUI(); tapStart = pos; tapStartTime = Time.unscaledTime; }
+            if (!up || !tapCandidate) return;
+            tapCandidate = false;
+            float slop = Mathf.Max(14f, Screen.dpi > 0 ? Screen.dpi * 0.1f : Screen.height * 0.015f);
+            if ((pos - tapStart).magnitude > slop || Time.unscaledTime - tapStartTime > 0.5f) return;
+
+            Physics.SyncTransforms();
+            RaycastHit hit;
+            if (!Physics.Raycast(cam.ScreenPointToRay(pos), out hit, 1e6f, 1 << RocketView.PartLayer)) return;
+            var pv = hit.collider.GetComponent<PartView>();
+            if (pv == null) return;
+            string msg = vessel.TapPart(pv.uid);
+            if (string.IsNullOrEmpty(msg)) return;
+            hud.Message(msg, 1.8f);
+            hud.hint.text = "";
             AppRoot.Instance.Audio.Play(Sfx.Click);
         }
 
@@ -152,6 +226,17 @@ namespace Apogee.Flight
             if (Input.GetKeyDown(KeyCode.X)) t = 0f;
             t = Mathf.Clamp01(t);
             if (Mathf.Abs(t - vessel.throttle) > 1e-4f) { vessel.throttle = t; hud.throttle.value = t; }
+
+            double rx = 0, ry = 0;
+            if (hud.rcsRight.Held || Input.GetKey(KeyCode.L)) rx += 1;
+            if (hud.rcsLeft.Held || Input.GetKey(KeyCode.J)) rx -= 1;
+            if (hud.rcsUp.Held || Input.GetKey(KeyCode.I)) ry += 1;
+            if (hud.rcsDown.Held || Input.GetKey(KeyCode.K)) ry -= 1;
+            vessel.rcsX = rx;
+            vessel.rcsY = ry;
+            if (Input.GetKeyDown(KeyCode.R)) ToggleRcs();
+            if (Input.GetKeyDown(KeyCode.V)) ToggleInside();
+            DetectTap();
 
             if (Input.GetKeyDown(KeyCode.Space)) DoStage();
             if (Input.GetKeyDown(KeyCode.E)) ToggleEngine();
@@ -288,6 +373,11 @@ namespace Apogee.Flight
             hud.solidRow.SetActive(solid >= 0f);
             if (solid >= 0f) hud.solidFill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(solid), 1f);
             UIFactory.SetLabel(hud.mapButton, map.Active ? "Flight" : "Map");
+            UIFactory.SetButtonColor(hud.insideButton, world.XRayOn ? Theme.ButtonPrimary : Theme.ButtonBg);
+            float rcsFuel = vessel.RcsFuelFraction();
+            UIFactory.SetLabel(hud.rcsButton, rcsFuel >= 0f ? "RCS " + Mathf.RoundToInt(rcsFuel * 100f) + "%" : "RCS");
+            UIFactory.SetButtonColor(hud.rcsButton, vessel.rcsOn ? Theme.ButtonPrimary : Theme.ButtonBg);
+            hud.rcsPad.gameObject.SetActive(vessel.rcsOn && !map.Active);
 
             PlaceMapLabel(hud.apLabel, map.Active && map.HasApoapsis, map.ApoWorld, "Ap " + FlightHUD.FormatDistance(vessel.CurrentOrbit().apoapsis - FlightVessel.R));
             PlaceMapLabel(hud.peLabel, map.Active && map.HasPeriapsis, map.PeriWorld, "Pe " + FlightHUD.FormatDistance(vessel.CurrentOrbit().periapsis - FlightVessel.R));

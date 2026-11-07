@@ -327,7 +327,7 @@ namespace Apogee.Menu
             if (portrait) status.alignment = TextAnchor.LowerCenter;
             UIFactory.Place(status.rectTransform, portrait ? new Vector2(0.5f, 0) : new Vector2(1, 0), portrait ? new Vector2(0.5f, 0) : new Vector2(1, 0),
                 portrait ? new Vector2(0, 52) : new Vector2(-30, 24), new Vector2(portrait ? 1000 : 900, 40));
-            var ver = UIFactory.Label(root, "Phase 2 build  ·  v" + Application.version, 18, Theme.Muted, TextAnchor.LowerLeft);
+            var ver = UIFactory.Label(root, "Phase 3 build  ·  v" + Application.version, 18, Theme.Muted, TextAnchor.LowerLeft);
             UIFactory.Place(ver.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(30, 24), new Vector2(600, 36));
         }
 

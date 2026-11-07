@@ -76,6 +76,17 @@ namespace Apogee.Rocket
                     pos = pp.position + pp.rotation * local;
                     break;
                 }
+                case AttachMode.Flank:
+                {
+                    // Upright part glued to the parent's side: its axis runs parallel to the parent's, offset outwards.
+                    float a = child.angle * Mathf.Deg2Rad;
+                    Vector3 dir = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                    float pr = pd.RadiusAt(child.heightFrac);
+                    float cr = Mathf.Max(cd.Radius, cd.TopRadius);
+                    rot = pp.rotation * Quaternion.Euler(0f, -child.angle + child.yaw, 0f);
+                    pos = pp.position + pp.rotation * (dir * (pr + cr) + Vector3.up * (child.heightFrac * pd.height));
+                    break;
+                }
                 case AttachMode.Side:
                 {
                     // Parent is a radial decoupler; its outer face sits at local +X = its depth.

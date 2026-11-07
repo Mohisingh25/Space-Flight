@@ -607,6 +607,15 @@ namespace Apogee.Builder
             float threshold = Mathf.Max(1.2f, cam.ViewHeight * (Mode2D ? 0.12f : 0.09f));
             if (best.valid && bestD < threshold && (!surface.valid || bestD < threshold * 0.4f)) return best;
             if (surface.valid) return surface;
+
+            // Stack parts (tanks, engines, boosters, girders) can also stand against the side of another part.
+            if (RocketAssembly.CanStack(def) && !def.radialMount)
+            {
+                Vector3 rp = view.ToRocket(FreePoint(sp));
+                var flank = RocketAssembly.FlankCandidate(Bp, poses, PartDims.Of(held.Root), rp, threshold * 0.8f);
+                if (flank.valid && (!best.valid || bestD > threshold * 0.5f)) return flank;
+            }
+            if (best.valid && bestD < threshold) return best;
             return none;
         }
 
@@ -656,7 +665,7 @@ namespace Apogee.Builder
             if (def != null && !RocketAssembly.CanStack(def))
                 dialogs.Toast("Radial parts attach to the side of tanks, capsules and boosters.", Theme.Warn);
             else
-                dialogs.Toast("Drop the part on a green attach node.", Theme.Warn);
+                dialogs.Toast("Drop it on a green node, or right beside a tank to attach it to the side.", Theme.Warn);
         }
 
         // ================================================================== edit commands
@@ -693,7 +702,7 @@ namespace Apogee.Builder
         public void CycleSymmetry()
         {
             symmetryIndex = (symmetryIndex + 1) % SymmetryModes.Length;
-            if (held != null && held.Root.Def.radialMount)
+            if (held != null && (held.Root.Def.radialMount || RocketAssembly.CanStack(held.Root.Def)))
             {
                 held.symmetry = Symmetry;
                 ghostKey = null;
@@ -849,6 +858,41 @@ namespace Apogee.Builder
             StagingSystem.ResetToAuto(Bp);
             Refresh();
             dialogs.Toast("Staging reset to automatic order.", Theme.Accent);
+        }
+
+        /// <summary>See-through view of the whole rocket: propellant, engines, crew and payload inside.</summary>
+        public bool InsideView { get; private set; }
+
+        public void ToggleInside()
+        {
+            InsideView = !InsideView;
+            view.SetXRay(InsideView);
+            audioMgr.Play(Sfx.Click);
+            dialogs.Toast(InsideView ? "Inside view: fuel (orange) and oxidiser (blue) tanks, engines and crew." : "Inside view off.", Theme.Accent, 2.2f);
+            if (Changed != null) Changed();
+        }
+
+        /// <summary>Paints the selected part and its symmetry copies (-1 = factory finish).</summary>
+        public void PaintSelected(int paint)
+        {
+            var p = Selected;
+            if (p == null) return;
+            PushUndo();
+            int uid = p.uid;
+            foreach (var m in Bp.SymmetryMembers(p)) m.paint = paint;
+            Refresh();
+            Select(uid);
+        }
+
+        public void PaintAll(int paint)
+        {
+            if (Bp.IsEmpty) return;
+            PushUndo();
+            int uid = SelectedUid;
+            foreach (var m in Bp.parts) if (m.Def.Paintable) m.paint = paint;
+            Refresh();
+            Select(uid);
+            dialogs.Toast(paint < 0 ? "Factory colours restored." : "Whole rocket painted " + PartPaint.Names[paint] + ".", Theme.Good, 1.8f);
         }
 
         public void ToggleMarkers(bool on)

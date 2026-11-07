@@ -11,7 +11,8 @@ namespace Apogee.Rocket
         Below = 1,    // child's top node joins the parent's bottom node
         Above = 2,    // child's bottom node joins the parent's top node
         Surface = 3,  // radial part glued to the parent's surface
-        Side = 4      // stack part hung off a radial decoupler's outer node
+        Side = 4,     // stack part hung off a radial decoupler's outer node
+        Flank = 5     // stack part (tank, engine, booster) glued upright to the side of another part
     }
 
     /// <summary>One placed part. Position is derived from the attachment description by RocketLayout.</summary>
@@ -30,6 +31,7 @@ namespace Apogee.Rocket
         public int symmetryGroup;   // parts placed together in symmetry share a non-zero id
         public float payloadMass;   // t, for payload containers / cargo modules
         public int stage = -1;      // activation stage (0 = launch) for staged parts
+        public int paint = -1;      // index into PaintPalette, -1 = the part's factory finish
 
         public PartDefinition Def { get { return PartCatalog.Get(partId); } }
 

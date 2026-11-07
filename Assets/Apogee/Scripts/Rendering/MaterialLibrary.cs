@@ -91,6 +91,11 @@ namespace Apogee.Rendering
                 case "rubber": return S(0.06f, 0.06f, 0.06f, 0f, 0.3f);
                 case "copper": return S(0.85f, 0.52f, 0.32f, 1f, 0.6f);
                 case "mli_white": return S(0.95f, 0.95f, 0.93f, 0.0f, 0.3f, "foil");
+                case "fuel_rp1": return S(0.95f, 0.62f, 0.18f, 0f, 0.85f);
+                case "fuel_lox": return S(0.55f, 0.8f, 1f, 0f, 0.9f);
+                case "fuel_solid": return S(0.55f, 0.47f, 0.38f, 0f, 0.15f);
+                case "seat": return S(0.25f, 0.27f, 0.3f, 0.2f, 0.4f);
+                case "suit": return S(0.95f, 0.95f, 0.95f, 0f, 0.35f);
                 // environment
                 case "concrete": return S(1f, 1f, 1f, 0f, 0.25f, "concrete", 0.05f, 0.05f); // box UVs are in metres: one tile per 20 m
                 case "wall": return S(0.52f, 0.55f, 0.58f, 0.3f, 0.35f, "wall", 10f, 4f);

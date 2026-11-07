@@ -24,6 +24,10 @@ namespace Apogee.Core
         public bool batterySaver;
         public bool showBalanceMarkers;
 
+        // Cheats: only active when the master switch is on.
+        public bool cheatsEnabled;
+        public bool cheatInfiniteFuel, cheatNoGravity, cheatNoDrag, cheatUnbreakable, cheatSuperThrust;
+
         public event Action Changed;
 
         public static GameSettings Load()

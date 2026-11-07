@@ -90,6 +90,12 @@ namespace Apogee.Flight
         readonly Dictionary<int, GameObject> partObjects = new Dictionary<int, GameObject>();
         readonly List<FlameFx> flames = new List<FlameFx>();
         readonly Dictionary<Debris, Transform> debrisRoots = new Dictionary<Debris, Transform>();
+        readonly Dictionary<int, float> foldAnim = new Dictionary<int, float>();   // 0 = deployed, 1 = folded
+        readonly HashSet<int> foldApplied = new HashSet<int>();
+        readonly Dictionary<int, Transform> canopies = new Dictionary<int, Transform>();
+        Mesh canopyMesh;
+        bool xray;
+        public bool XRayOn { get { return xray; } }
 
         Mesh groundMesh, atmoMesh;
         Material groundMat, atmoMat, starMat;
@@ -258,7 +264,15 @@ namespace Apogee.Flight
                 var r = go.AddComponent<MeshRenderer>();
                 r.sharedMaterials = model.materials;
                 r.shadowCastingMode = ShadowCastingMode.On;
+                PartPaint.Apply(r, model.materialKeys, p.paint, new MaterialPropertyBlock());
+                // Tappable in flight: engines on/off, fold legs and arrays, deploy chutes, separate...
+                go.layer = RocketView.PartLayer;
+                go.AddComponent<MeshCollider>().sharedMesh = model.mesh;
+                var pv = go.AddComponent<PartView>();
+                pv.uid = p.uid;
+                pv.part = p;
                 partObjects[p.uid] = go;
+                if (p.Def.Foldable) foldAnim[p.uid] = vessel.folded.Contains(p.uid) ? 1f : 0f;
 
                 var d = p.Def;
                 if (d.IsEngine)
@@ -378,6 +392,8 @@ namespace Apogee.Flight
                 {
                     go.transform.SetParent(root, true);
                     partObjects.Remove(u);
+                    Transform cnp;
+                    if (canopies.TryGetValue(u, out cnp)) { Destroy(cnp.gameObject); canopies.Remove(u); }
                 }
             }
             debrisRoots[d] = root;
@@ -412,6 +428,107 @@ namespace Apogee.Flight
             Destroy(go);
         }
 
+        public void SetXRay(bool on)
+        {
+            xray = on;
+            foreach (var kv in partObjects) if (kv.Value != null) XRay.Apply(kv.Value, vessel.state.byUid[kv.Key], on);
+        }
+
+        /// <summary>Animates folding legs / solar arrays, chute canopies and the inside-view fuel levels.</summary>
+        void UpdateParts()
+        {
+            foreach (var kv in partObjects)
+            {
+                int uid = kv.Key;
+                var go = kv.Value;
+                if (go == null) continue;
+                var p = vessel.state.byUid[uid];
+                var d = p.Def;
+                float f;
+                if (foldAnim.TryGetValue(uid, out f))
+                {
+                    float target = vessel.folded.Contains(uid) ? 1f : 0f;
+                    float nf = Mathf.MoveTowards(f, target, Time.deltaTime * 1.4f);
+                    if (nf != f || !foldApplied.Contains(uid))
+                    {
+                        foldApplied.Add(uid);
+                        foldAnim[uid] = nf;
+                        PartPose pose;
+                        vessel.poses.TryGetValue(uid, out pose);
+                        var dims = PartDims.Of(p);
+                        float e = nf * nf * (3f - 2f * nf);
+                        if (d.isLeg)
+                        {
+                            // Legs swing up about their hinge until they lie along the hull (like a booster's landing legs).
+                            var hinge = new Vector3(0.12f, dims.height * 0.3f, 0f);
+                            var q = Quaternion.Euler(0f, 0f, 140f * e);
+                            go.transform.localRotation = pose.rotation * q;
+                            go.transform.localPosition = pose.position + pose.rotation * (hinge - q * hinge);
+                        }
+                        else
+                        {
+                            // Solar arrays retract concertina-style towards their mount.
+                            go.transform.localPosition = pose.position;
+                            go.transform.localRotation = pose.rotation;
+                            go.transform.localScale = new Vector3(Mathf.Lerp(1f, 0.26f, e), Mathf.Lerp(1f, 0.85f, e), 1f);
+                        }
+                    }
+                }
+                if (xray && d.fuelMass > 0f)
+                {
+                    float fuel;
+                    vessel.state.fuel.TryGetValue(uid, out fuel);
+                    XRay.SetFuel(go, fuel / Mathf.Max(1e-5f, PartMass.Fuel(p)));
+                }
+                if (d.isParachute) UpdateCanopy(uid, go, d);
+            }
+        }
+
+        void UpdateCanopy(int uid, GameObject part, PartDefinition d)
+        {
+            bool show = vessel.chutesDeployed.Contains(uid) && vessel.chuteArmed && vessel.Altitude < 30000 && vessel.status != FlightStatus.Crashed;
+            Transform c;
+            if (!canopies.TryGetValue(uid, out c))
+            {
+                if (!show) return;
+                if (canopyMesh == null)
+                {
+                    var mb = new MeshBuilder();
+                    var dome = new List<Vector2>();
+                    for (int i = 0; i <= 10; i++)
+                    {
+                        float t = i / 10f;
+                        dome.Add(new Vector2(Mathf.Cos(t * Mathf.PI * 0.5f), Mathf.Sin(t * Mathf.PI * 0.5f) * 0.55f));
+                    }
+                    dome[dome.Count - 1] = new Vector2(0f, 0.55f);
+                    mb.Lathe(dome, 24, 0);
+                    mb.Lathe(new List<Vector2> { new Vector2(0f, 0.53f), new Vector2(1f, -0.02f) }, 24, 0); // underside
+                    for (int i = 0; i < 6; i++)
+                    {
+                        float a = i * 60f * Mathf.Deg2Rad;
+                        mb.Tube(new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)), new Vector3(0f, -1.6f, 0f), 0.008f, 4, 0);
+                    }
+                    canopyMesh = mb.ToMesh("Canopy");
+                }
+                var go = new GameObject("Canopy");
+                go.AddComponent<MeshFilter>().sharedMesh = canopyMesh;
+                var r = go.AddComponent<MeshRenderer>();
+                r.sharedMaterial = MaterialLibrary.Get("chute");
+                c = go.transform;
+                canopies[uid] = c;
+            }
+            c.gameObject.SetActive(show && part.activeInHierarchy);
+            if (!show) return;
+            // Drogue first (small), then the main canopy as it inflates; it trails above the part, against the airflow.
+            float open = vessel.chuteOpen;
+            float radius = (1.4f + open * 8.6f) * Mathf.Sqrt(d.chuteScale);
+            var v = vessel.vel;
+            Vector3 trail = v.magnitude > 2 ? -new Vector3((float)v.x, (float)v.y, 0f).normalized : vesselRoot.up;
+            c.position = part.transform.position + trail * radius * 1.6f;
+            c.rotation = Quaternion.FromToRotation(Vector3.up, trail);
+            c.localScale = Vector3.one * radius;
+        }
+
         public void HideVessel()
         {
             foreach (var go in partObjects.Values) if (go != null) go.SetActive(false);
@@ -431,6 +548,7 @@ namespace Apogee.Flight
         {
             origin = vessel.pos;
             UpdateVesselTransform();
+            UpdateParts();
             double alt = vessel.Altitude;
             float pr = (float)EarthAtmosphere.PressureRatio(alt);
 

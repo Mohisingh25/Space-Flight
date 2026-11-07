@@ -119,6 +119,45 @@ namespace Apogee.Rocket
             return c;
         }
 
+        /// <summary>
+        /// Side-by-side placement for stack parts (tanks, engines, boosters, girders): finds the part whose side the
+        /// held part's centre (rocket space) is beside, and returns a Flank candidate that stands it upright
+        /// against that side. maxGap is how far from touching the held part may still be and snap.
+        /// </summary>
+        public static AttachCandidate FlankCandidate(RocketBlueprint bp, Dictionary<int, PartPose> poses, PartDims held, Vector3 point, float maxGap)
+        {
+            var best = new AttachCandidate();
+            float bestGap = maxGap;
+            float hr = Mathf.Max(held.Radius, held.TopRadius);
+            foreach (var p in bp.parts)
+            {
+                var def = p.Def;
+                if (!def.acceptsRadial || !CanStack(def)) continue;
+                PartPose pose;
+                if (!poses.TryGetValue(p.uid, out pose)) continue;
+                var dims = PartDims.Of(p);
+                Vector3 local = Quaternion.Inverse(pose.rotation) * (point - pose.position);
+                float hf = dims.height > 0.01f ? local.y / dims.height : 0f;
+                if (hf < -0.75f || hf > 0.75f) continue;
+                hf = Mathf.Clamp(Mathf.Round(hf * 20f) / 20f, -0.5f, 0.5f);
+                float radial = new Vector2(local.x, local.z).magnitude;
+                float gap = Mathf.Abs(radial - (dims.RadiusAt(hf) + hr));
+                if (gap >= bestGap) continue;
+                float angle = Mathf.Round(Mathf.Atan2(local.z, local.x) * Mathf.Rad2Deg / 5f) * 5f;
+                bestGap = gap;
+                best.valid = true;
+                best.parentUid = p.uid;
+                best.mode = AttachMode.Flank;
+                best.angle = angle;
+                best.heightFrac = hf;
+                float a = angle * Mathf.Deg2Rad;
+                best.nodePosition = pose.position + pose.rotation * new Vector3(Mathf.Cos(a) * dims.RadiusAt(hf), hf * dims.height, Mathf.Sin(a) * dims.RadiusAt(hf));
+            }
+            return best;
+        }
+
+        public static bool IsRadialMode(AttachMode m) { return m == AttachMode.Surface || m == AttachMode.Flank; }
+
         // ------------------------------------------------------------------ edits
 
         /// <summary>Places a held assembly as the first (root) part of an empty blueprint.</summary>
@@ -157,7 +196,7 @@ namespace Apogee.Rocket
             if (target == null || held.Root == null || !cand.valid) return newRoots;
 
             var targets = bp.SymmetryMembers(target);
-            int perTarget = cand.mode == AttachMode.Surface ? Mathf.Max(1, held.symmetry) : 1;
+            int perTarget = IsRadialMode(cand.mode) ? Mathf.Max(1, held.symmetry) : 1;
             int total = 0;
             foreach (var t in targets) if (NodeFree(bp, t, cand.mode)) total += perTarget;
             if (total == 0) return newRoots;
@@ -243,7 +282,7 @@ namespace Apogee.Rocket
             held.parts[0].mode = AttachMode.Root;
             held.parts[0].parentUid = -1;
             int members = bp.SymmetryMembers(p).Count;
-            held.symmetry = p.mode == AttachMode.Surface ? Mathf.Max(1, CountSameParent(bp, p)) : 1;
+            held.symmetry = IsRadialMode(p.mode) ? Mathf.Max(1, CountSameParent(bp, p)) : 1;
             if (members <= 1) held.symmetry = 1;
             return held;
         }
@@ -275,7 +314,7 @@ namespace Apogee.Rocket
         {
             var p = bp.Find(uid);
             if (p == null) return;
-            bool radial = p.mode == AttachMode.Surface;
+            bool radial = IsRadialMode(p.mode);
             foreach (var m in bp.SymmetryMembers(p)) m.yaw = Mathf.Repeat(m.yaw + (radial ? 90f : 45f), 360f);
         }
 

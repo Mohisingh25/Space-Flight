@@ -107,6 +107,19 @@ namespace Apogee.Rendering
                 case PartShape.Capsule: Capsule(r, rt, h, mb, m, 2); break;
                 case PartShape.CommandModule: Capsule(r, rt, h, mb, m, 4); break;
                 case PartShape.ProbeCore: Probe(r, h, mb, m); break;
+                case PartShape.Wheel: Wheel(h, mb, m); break;
+                case PartShape.Girder: Girder(r, h, mb, m); break;
+                case PartShape.StructuralPanel: Panel(d.diameter, h, mb, m); break;
+                case PartShape.HeatShield: HeatShield(r, h, mb, m); break;
+                case PartShape.RadialChute:
+                {
+                    var saved = mb.transform;
+                    mb.transform = saved * Matrix4x4.TRS(new Vector3(r + 0.06f, 0f, 0f), Quaternion.identity, Vector3.one);
+                    Parachute(r, r * 0.6f, h, mb, m);
+                    mb.transform = saved;
+                    mb.Box(new Vector3(0.04f, 0f, 0f), new Vector3(0.1f, h * 0.5f, r), m["dark_metal"]);
+                    break;
+                }
                 default: mb.Cylinder(r, -h / 2, h / 2, Segs(r), m["white"]); break;
             }
         }
@@ -295,6 +308,58 @@ namespace Apogee.Rendering
                 mb.Tube(p1 + Vector3.up * (-h / 2 + plate), p0 + Vector3.up * (h / 2 - plate), br * 0.6f, 8, m["aluminium"]);
             }
             mb.Cylinder(r * 0.25f, -h / 2 + plate, h / 2 - plate, 16, m["copper"], false); // central feed line
+        }
+
+        /// <summary>Square lattice beam: four longerons with X-bracing on every face.</summary>
+        static void Girder(float r, float h, MeshBuilder mb, Mats m)
+        {
+            float s = r * 0.85f, br = Mathf.Max(0.025f, r * 0.08f);
+            var corners = new[] { new Vector3(s, 0f, s), new Vector3(-s, 0f, s), new Vector3(-s, 0f, -s), new Vector3(s, 0f, -s) };
+            foreach (var c in corners) mb.Box(c, new Vector3(br * 2f, h, br * 2f), m["carbon"]);
+            mb.Box(new Vector3(0f, -h / 2 + 0.03f, 0f), new Vector3(s * 2.2f, 0.06f, s * 2.2f), m["dark_metal"]);
+            mb.Box(new Vector3(0f, h / 2 - 0.03f, 0f), new Vector3(s * 2.2f, 0.06f, s * 2.2f), m["dark_metal"]);
+            int bays = Mathf.Max(1, Mathf.RoundToInt(h / (s * 2.2f)));
+            for (int b = 0; b < bays; b++)
+            {
+                float y0 = -h / 2 + h * b / bays, y1 = -h / 2 + h * (b + 1) / bays;
+                for (int i = 0; i < 4; i++)
+                {
+                    var a = corners[i];
+                    var c = corners[(i + 1) % 4];
+                    mb.Tube(a + Vector3.up * y0, c + Vector3.up * y1, br * 0.55f, 6, m["aluminium"]);
+                    mb.Tube(c + Vector3.up * y0, a + Vector3.up * y1, br * 0.55f, 6, m["aluminium"]);
+                }
+            }
+        }
+
+        static void Panel(float w, float h, MeshBuilder mb, Mats m)
+        {
+            mb.Box(new Vector3(w * 0.5f, 0f, 0f), new Vector3(w, h, 0.05f), m["aluminium"]);
+            mb.Box(new Vector3(w * 0.5f, 0f, 0.03f), new Vector3(w * 0.9f, h * 0.9f, 0.02f), m["white"]);
+            mb.Box(new Vector3(0.03f, 0f, 0f), new Vector3(0.06f, h, 0.12f), m["dark_metal"]);
+        }
+
+        static void HeatShield(float r, float h, MeshBuilder mb, Mats m)
+        {
+            int seg = Segs(r);
+            float y0 = -h / 2, y1 = h / 2;
+            mb.Lathe(P(0f, y0, r * 0.6f, y0 + h * 0.08f, r * 0.95f, y0 + h * 0.35f, r, y0 + h * 0.6f), seg, m["heatshield"]);
+            mb.Lathe(P(r, y0 + h * 0.6f, r, y1, 0f, y1), seg, m["dark_metal"]);
+        }
+
+        /// <summary>Strut out from the hull, with a tyre whose axle is parallel to the hull's Z axis.</summary>
+        static void Wheel(float h, MeshBuilder mb, Mats m)
+        {
+            float R = h * 0.5f, w = R * 0.55f;
+            var hub = new Vector3(0.18f + R * 0.75f, -R * 0.35f, 0f);
+            mb.Box(new Vector3(0.05f, 0f, 0f), new Vector3(0.1f, 0.3f, 0.25f), m["dark_metal"]);
+            mb.Tube(new Vector3(0.1f, 0.05f, 0f), hub + new Vector3(0f, 0f, -w * 0.6f), 0.045f, 8, m["aluminium"]);
+            mb.Tube(new Vector3(0.1f, -0.05f, 0f), hub + new Vector3(0f, 0f, -w * 0.6f), 0.035f, 8, m["dark_metal"]);
+            var saved = mb.transform;
+            mb.transform = saved * Matrix4x4.TRS(hub, Quaternion.Euler(90f, 0f, 0f), Vector3.one);
+            mb.Lathe(P(R * 0.6f, -w / 2, R * 0.92f, -w / 2, R, -w * 0.3f, R, w * 0.3f, R * 0.92f, w / 2, R * 0.6f, w / 2), 28, m["rubber"]);
+            mb.Lathe(P(0f, -w * 0.42f, R * 0.6f, -w * 0.42f, R * 0.6f, w * 0.42f, 0f, w * 0.42f), 20, m["aluminium"]);
+            mb.transform = saved;
         }
 
         // ------------------------------------------------------------------ propulsion
