@@ -23,13 +23,46 @@ namespace Apogee.Menu
         Text status;
         float t;
         Vector3 camBase;
+        Vector3 rocketBase = new Vector3(13f, 1f, 64f);
+        RectTransform uiRoot;
 
         void Start()
         {
             AppRoot.Instance.Audio.SetAmbience(Ambience.Space);
             BuildScene();
             BuildUI();
+            ApplyOrientation();
+            AppRoot.OrientationChanged += OnOrientationChanged;
             StartCoroutine(LoadEarth());
+        }
+
+        void OnDestroy() { AppRoot.OrientationChanged -= OnOrientationChanged; }
+
+        void OnOrientationChanged()
+        {
+            string keep = status != null ? status.text : "";
+            if (uiRoot != null) Destroy(uiRoot.parent.gameObject);
+            BuildUI();
+            status.text = keep;
+            ApplyOrientation();
+        }
+
+        /// <summary>Re-frames the showcase scene: rocket beside the menu in landscape, above it in portrait.</summary>
+        void ApplyOrientation()
+        {
+            if (UIFactory.Portrait)
+            {
+                rocketBase = new Vector3(0f, 8f, 64f);
+                earth.position = new Vector3(22f, -112f, 260f);
+                earth.localScale = Vector3.one * 108f;
+            }
+            else
+            {
+                rocketBase = new Vector3(13f, 1f, 64f);
+                earth.position = new Vector3(70f, -62f, 185f);
+                earth.localScale = Vector3.one * 92f;
+            }
+            if (rocket != null) rocket.position = rocketBase;
         }
 
         // ------------------------------------------------------------------ scene
@@ -189,7 +222,7 @@ namespace Apogee.Menu
             if (rocket != null)
             {
                 rocket.Rotate(Vector3.up, 6f * Time.deltaTime, Space.Self);
-                rocket.position = new Vector3(13f, 1f + Mathf.Sin(t * 0.35f) * 0.6f, 64f);
+                rocket.position = rocketBase + new Vector3(0f, Mathf.Sin(t * 0.35f) * 0.6f, 0f);
             }
             if (cam != null)
             {
@@ -208,30 +241,59 @@ namespace Apogee.Menu
         {
             Canvas canvas;
             var root = UIFactory.CreateCanvas("Main Menu", 10, out canvas);
+            uiRoot = root;
+            bool portrait = UIFactory.Portrait;
 
             // Soft vignette behind the menu column for legibility
             var shade = UIFactory.Panel(root, new Color(0, 0, 0, 0.35f), false, "Shade");
             shade.rectTransform.anchorMin = new Vector2(0, 0);
-            shade.rectTransform.anchorMax = new Vector2(0.42f, 1);
+            shade.rectTransform.anchorMax = portrait ? new Vector2(1, 0.56f) : new Vector2(0.42f, 1);
             shade.rectTransform.offsetMin = new Vector2(-200, -200);
-            shade.rectTransform.offsetMax = new Vector2(0, 200);
+            shade.rectTransform.offsetMax = portrait ? new Vector2(200, 0) : new Vector2(0, 200);
             shade.raycastTarget = false;
 
             var col = UIFactory.Rect("Menu", root);
-            col.anchorMin = new Vector2(0, 0);
-            col.anchorMax = new Vector2(0, 1);
-            col.pivot = new Vector2(0, 0.5f);
-            col.offsetMin = new Vector2(90, 70);
-            col.offsetMax = new Vector2(90 + 620, -70);
-            var v = UIFactory.Vertical(col, 12, 0, true);
-            v.childAlignment = TextAnchor.MiddleLeft;
+            if (portrait)
+            {
+                // Title at the top, rocket and Earth in the middle, menu column along the bottom.
+                var head = UIFactory.Rect("Title", root);
+                head.anchorMin = new Vector2(0, 1);
+                head.anchorMax = new Vector2(1, 1);
+                head.pivot = new Vector2(0.5f, 1);
+                head.offsetMin = new Vector2(40, -250);
+                head.offsetMax = new Vector2(-40, -70);
+                UIFactory.Vertical(head, 4, 0, true).childAlignment = TextAnchor.UpperCenter;
+                var pt = UIFactory.Label(head, "A P O G E E", 104, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
+                UIFactory.Size(pt, -1, 124);
+                var ps = UIFactory.Label(head, "SPACEFLIGHT  SIMULATOR", 30, Theme.Accent, TextAnchor.MiddleCenter, FontStyle.Bold);
+                UIFactory.Size(ps, -1, 46);
 
-            var title = UIFactory.Label(col, "A P O G E E", 96, Theme.Text, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UIFactory.Size(title, -1, 120);
-            var sub = UIFactory.Label(col, "SPACEFLIGHT  SIMULATOR", 28, Theme.Accent, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UIFactory.Size(sub, -1, 44);
-            var gap = UIFactory.Rect("Gap", col);
-            UIFactory.Size(gap, -1, 26);
+                col.anchorMin = new Vector2(0, 0);
+                col.anchorMax = new Vector2(1, 0);
+                col.pivot = new Vector2(0.5f, 0);
+                col.offsetMin = new Vector2(60, 90);
+                col.offsetMax = new Vector2(-60, 90 + 760);
+            }
+            else
+            {
+                col.anchorMin = new Vector2(0, 0);
+                col.anchorMax = new Vector2(0, 1);
+                col.pivot = new Vector2(0, 0.5f);
+                col.offsetMin = new Vector2(90, 70);
+                col.offsetMax = new Vector2(90 + 620, -70);
+            }
+            var v = UIFactory.Vertical(col, 12, 0, true);
+            v.childAlignment = portrait ? TextAnchor.LowerCenter : TextAnchor.MiddleLeft;
+
+            if (!portrait)
+            {
+                var title = UIFactory.Label(col, "A P O G E E", 96, Theme.Text, TextAnchor.MiddleLeft, FontStyle.Bold);
+                UIFactory.Size(title, -1, 120);
+                var sub = UIFactory.Label(col, "SPACEFLIGHT  SIMULATOR", 28, Theme.Accent, TextAnchor.MiddleLeft, FontStyle.Bold);
+                UIFactory.Size(sub, -1, 44);
+                var gap = UIFactory.Rect("Gap", col);
+                UIFactory.Size(gap, -1, 26);
+            }
 
             bool hasAutosave = SaveSystem.HasAutosave();
             MenuButton(col, "Sandbox Mode", hasAutosave ? "Continue your last design with unlimited parts" : "Unlimited parts — build anything", ButtonStyle.Primary, () =>
@@ -254,7 +316,7 @@ namespace Apogee.Menu
             var grid = UIFactory.Rect("Locked", col);
             UIFactory.Size(grid, -1, 130);
             var g = grid.gameObject.AddComponent<GridLayoutGroup>();
-            g.cellSize = new Vector2(300, 58);
+            g.cellSize = portrait ? new Vector2(470, 58) : new Vector2(300, 58);
             g.spacing = new Vector2(12, 12);
             Locked(grid, "New Career", 5, "Career mode (research, budget, tech tree) is planned for Phase 5.");
             Locked(grid, "Mission Mode", 5, "Structured missions — from first launch to Mars — are planned for Phase 5.");
@@ -262,8 +324,10 @@ namespace Apogee.Menu
             Locked(grid, "Planet Explorer", 3, "Orbital flight, the Moon and the navigation map arrive in Phase 3.");
 
             status = UIFactory.Label(root, "", 20, Theme.Muted, TextAnchor.LowerRight);
-            UIFactory.Place(status.rectTransform, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-30, 24), new Vector2(900, 40));
-            var ver = UIFactory.Label(root, "Phase 1 build  ·  v" + Application.version, 18, Theme.Muted, TextAnchor.LowerLeft);
+            if (portrait) status.alignment = TextAnchor.LowerCenter;
+            UIFactory.Place(status.rectTransform, portrait ? new Vector2(0.5f, 0) : new Vector2(1, 0), portrait ? new Vector2(0.5f, 0) : new Vector2(1, 0),
+                portrait ? new Vector2(0, 52) : new Vector2(-30, 24), new Vector2(portrait ? 1000 : 900, 40));
+            var ver = UIFactory.Label(root, "Phase 2 build  ·  v" + Application.version, 18, Theme.Muted, TextAnchor.LowerLeft);
             UIFactory.Place(ver.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(30, 24), new Vector2(600, 36));
         }
 

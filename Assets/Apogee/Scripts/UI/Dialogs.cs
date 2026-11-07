@@ -64,6 +64,8 @@ namespace Apogee.UI
         {
             var dim = UIFactory.Panel(root, new Color(0, 0, 0, 0.62f), false, "Modal");
             UIFactory.Stretch(dim.rectTransform);
+            width = Mathf.Min(width, UIFactory.CanvasWidth - 40f);
+            if (UIFactory.Portrait) height = Mathf.Min(height * 1.25f, 1700f);
             var card = UIFactory.Card(dim.transform, "Dialog");
             UIFactory.Place(card.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(width, height));
             var body = UIFactory.Rect("Body", card.transform);

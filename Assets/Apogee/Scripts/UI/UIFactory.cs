@@ -47,18 +47,40 @@ namespace Apogee.UI
         }
     }
 
+    /// <summary>Switches the canvas reference resolution between portrait (1080×1920) and landscape (1920×1080).</summary>
+    public class AdaptiveScaler : MonoBehaviour
+    {
+        CanvasScaler scaler;
+        bool? last;
+
+        void Awake() { scaler = GetComponent<CanvasScaler>(); Apply(); }
+        void Update() { Apply(); }
+
+        void Apply()
+        {
+            bool portrait = UIFactory.Portrait;
+            if (last.HasValue && last.Value == portrait) return;
+            last = portrait;
+            scaler.referenceResolution = portrait ? new Vector2(1080f, 1920f) : new Vector2(1920f, 1080f);
+            scaler.matchWidthOrHeight = portrait ? 0.15f : 0.6f;
+        }
+    }
+
     /// <summary>Keeps UI inside the device safe area (notches, rounded corners).</summary>
     public class SafeArea : MonoBehaviour
     {
         Rect last;
+        int lastW, lastH;
         RectTransform rt;
 
         void Awake() { rt = (RectTransform)transform; Apply(); }
-        void Update() { if (Screen.safeArea != last) Apply(); }
+        void Update() { if (Screen.safeArea != last || Screen.width != lastW || Screen.height != lastH) Apply(); }
 
         void Apply()
         {
             last = Screen.safeArea;
+            lastW = Screen.width;
+            lastH = Screen.height;
             if (Screen.width <= 0 || Screen.height <= 0) return;
             var min = new Vector2(last.xMin / Screen.width, last.yMin / Screen.height);
             var max = new Vector2(last.xMax / Screen.width, last.yMax / Screen.height);
@@ -73,6 +95,12 @@ namespace Apogee.UI
     public static class UIFactory
     {
         static Font font;
+
+        /// <summary>True when the screen is taller than it is wide.</summary>
+        public static bool Portrait { get { return Screen.height > Screen.width; } }
+
+        /// <summary>Usable width of a full-screen canvas in reference units.</summary>
+        public static float CanvasWidth { get { return Portrait ? 1080f : 1920f; } }
         static Sprite rounded, roundedSmall, glow;
 
         public static Font Font
@@ -146,6 +174,7 @@ namespace Apogee.UI
             scaler.referenceResolution = new Vector2(1920f, 1080f);
             scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
             scaler.matchWidthOrHeight = 0.6f;
+            go.AddComponent<AdaptiveScaler>();
             go.AddComponent<GraphicRaycaster>();
             var safe = Rect("SafeArea", go.transform);
             Stretch(safe);

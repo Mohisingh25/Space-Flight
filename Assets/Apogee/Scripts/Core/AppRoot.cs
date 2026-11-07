@@ -34,6 +34,10 @@ namespace Apogee.Core
     {
         public static AppRoot Instance { get; private set; }
 
+        /// <summary>Raised when the screen switches between portrait and landscape (phone rotated, window resized).</summary>
+        public static event System.Action OrientationChanged;
+        bool lastPortrait;
+
         public GameSettings Settings { get; private set; }
         public AudioManager Audio { get; private set; }
         public Dialogs Dialogs { get; private set; }
@@ -63,6 +67,7 @@ namespace Apogee.Core
             Input.multiTouchEnabled = true;
             Screen.sleepTimeout = SleepTimeout.SystemSetting;
 
+            lastPortrait = UIFactory.Portrait;
             Settings = GameSettings.Load();
             Settings.Apply();
             Settings.Changed += () => { Settings.Apply(); if (fpsText != null) fpsText.gameObject.SetActive(Settings.showFps); };
@@ -97,6 +102,12 @@ namespace Apogee.Core
 
         void Update()
         {
+            bool portrait = UIFactory.Portrait;
+            if (portrait != lastPortrait)
+            {
+                lastPortrait = portrait;
+                if (OrientationChanged != null) OrientationChanged();
+            }
             fpsAccum += Time.unscaledDeltaTime;
             fpsFrames++;
             if (fpsAccum >= 0.5f)

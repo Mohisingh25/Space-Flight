@@ -18,7 +18,7 @@ namespace Apogee.EditorTools
     [InitializeOnLoad]
     public static class ProjectSetup
     {
-        public const string SetupVersion = "2";
+        public const string SetupVersion = "3";
         const string MarkerPath = "ProjectSettings/ApogeeSetup.txt";
         public const string MainMenuScene = "Assets/Scenes/MainMenu.unity";
         public const string BuilderScene = "Assets/Scenes/Builder.unity";
@@ -256,7 +256,7 @@ namespace Apogee.EditorTools
             PlayerSettings.Android.minSdkVersion = (AndroidSdkVersions)26;
             PlayerSettings.Android.targetSdkVersion = AndroidSdkVersions.AndroidApiLevelAuto;
             PlayerSettings.defaultInterfaceOrientation = UIOrientation.AutoRotation;
-            PlayerSettings.allowedAutorotateToPortrait = false;
+            PlayerSettings.allowedAutorotateToPortrait = true;
             PlayerSettings.allowedAutorotateToPortraitUpsideDown = false;
             PlayerSettings.allowedAutorotateToLandscapeLeft = true;
             PlayerSettings.allowedAutorotateToLandscapeRight = true;

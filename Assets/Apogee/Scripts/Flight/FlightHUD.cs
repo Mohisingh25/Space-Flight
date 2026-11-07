@@ -69,12 +69,12 @@ namespace Apogee.Flight
 
             // ---- centre message
             message = UIFactory.Label(root, "", 40, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
-            UIFactory.Place(message.rectTransform, new Vector2(0.5f, 0.72f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1200, 80));
+            HorizontalBand(message.rectTransform, 0.72f, 80f);
             message.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.6f);
             messageGroup = message.gameObject.AddComponent<CanvasGroup>();
             messageGroup.alpha = 0f;
             hint = UIFactory.Label(root, "", 26, Theme.Text, TextAnchor.MiddleCenter);
-            UIFactory.Place(hint.rectTransform, new Vector2(0.5f, 0.62f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(1200, 60));
+            HorizontalBand(hint.rectTransform, 0.62f, 60f);
             hint.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.6f);
 
             controlsGroup = UIFactory.Rect("Controls", root);
@@ -108,6 +108,16 @@ namespace Apogee.Flight
             // ---- map labels
             apLabel = MapLabel("Ap");
             peLabel = MapLabel("Pe");
+        }
+
+        /// <summary>Full-width text band (with side margins) so messages fit in portrait as well as landscape.</summary>
+        static void HorizontalBand(RectTransform rt, float y, float height)
+        {
+            rt.anchorMin = new Vector2(0f, y);
+            rt.anchorMax = new Vector2(1f, y);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.offsetMin = new Vector2(40f, -height * 0.5f);
+            rt.offsetMax = new Vector2(-40f, height * 0.5f);
         }
 
         RectTransform MapLabel(string title)

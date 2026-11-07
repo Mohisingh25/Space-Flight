@@ -78,21 +78,53 @@ namespace Apogee.Builder
         Button holdSymButton;
         Button stageEarlier, stageLater;
 
-        const float SideW = 410f, TopH = 92f, Margin = 14f;
+        // portrait-only
+        RectTransform statsPanel, summaryStrip;
+        Text summaryText;
+        Button statsToggle;
+        bool statsOpen;
+
+        // Layout metrics; switched between landscape and portrait in Build().
+        const float Margin = 14f;
+        bool portrait;
+        float SideW = 410f, TopH = 92f, SummaryH = 0f;
 
         public void Init(BuilderController controller)
         {
             c = controller;
+            c.Changed += Refresh;
+            c.SelectionChanged += Refresh;
+            c.HoldChanged += Refresh;
+            c.StatsChanged += RebuildStats;
+            AppRoot.OrientationChanged += OnOrientationChanged;
+            Build();
+        }
+
+        void OnDestroy() { AppRoot.OrientationChanged -= OnOrientationChanged; }
+
+        void OnOrientationChanged()
+        {
+            if (root != null) Destroy(root.parent.gameObject);
+            categoryButtons.Clear();
+            thumbs.Clear();
+            Build();
+        }
+
+        void Build()
+        {
+            portrait = UIFactory.Portrait;
+            if (portrait) { SideW = 270f; TopH = 176f; SummaryH = 108f; }
+            else { SideW = 410f; TopH = 92f; SummaryH = 0f; }
+            statsOpen = false;
+            statsPanel = summaryStrip = null;
             Canvas canvas;
             root = UIFactory.CreateCanvas("Builder HUD", 10, out canvas);
             BuildTopBar();
             BuildPartsPanel();
             BuildStatsPanel();
+            if (portrait) BuildSummaryStrip();
             BuildBottomBars();
-            c.Changed += Refresh;
-            c.SelectionChanged += Refresh;
-            c.HoldChanged += Refresh;
-            c.StatsChanged += RebuildStats;
+            Refresh();
         }
 
         public void OnThumbnail(string id, Texture2D tex)
@@ -112,6 +144,7 @@ namespace Apogee.Builder
             rt.pivot = new Vector2(0.5f, 1);
             rt.offsetMin = new Vector2(Margin, -Margin - TopH);
             rt.offsetMax = new Vector2(-Margin, -Margin);
+            if (portrait) { BuildTopBarPortrait(bar.transform); return; }
             var row = UIFactory.Rect("Row", bar.transform);
             UIFactory.Stretch(row, 10, 10, 10, 10);
             var h = UIFactory.Horizontal(row, 10, 0, true);
@@ -137,6 +170,37 @@ namespace Apogee.Builder
             UIFactory.Size(UIFactory.Button(row, "Launch", c.Launch, ButtonStyle.Primary, 30), 180);
         }
 
+        /// <summary>Portrait: two rows — [Menu | name | Launch] then the editing tools.</summary>
+        void BuildTopBarPortrait(Transform bar)
+        {
+            var col = UIFactory.Rect("Rows", bar);
+            UIFactory.Stretch(col, 10, 10, 10, 10);
+            UIFactory.Vertical(col, 8, 0, true);
+
+            var r1 = UIFactory.Rect("Row1", col);
+            UIFactory.Size(r1, -1, -1, -1, 1);
+            var h1 = UIFactory.Horizontal(r1, 10, 0, true);
+            h1.childAlignment = TextAnchor.MiddleLeft;
+            UIFactory.Size(UIFactory.Button(r1, "Menu", c.BackToMenu), 120);
+            nameButton = UIFactory.Button(r1, "Untitled", c.SaveAs, ButtonStyle.Ghost, 28);
+            UIFactory.Size(nameButton, 200, -1, 1);
+            nameButton.GetComponentInChildren<Text>().alignment = TextAnchor.MiddleLeft;
+            UIFactory.Size(UIFactory.Button(r1, "Launch", c.Launch, ButtonStyle.Primary, 30), 220);
+
+            var r2 = UIFactory.Rect("Row2", col);
+            UIFactory.Size(r2, -1, -1, -1, 1);
+            var h2 = UIFactory.Horizontal(r2, 6, 0, true);
+            h2.childForceExpandWidth = true;
+            undoButton = UIFactory.Button(r2, "Undo", c.Undo, ButtonStyle.Normal, 22);
+            redoButton = UIFactory.Button(r2, "Redo", c.Redo, ButtonStyle.Normal, 22);
+            symButton = UIFactory.Button(r2, "Sym ×1", c.CycleSymmetry, ButtonStyle.Normal, 22);
+            stagingButton = UIFactory.Button(r2, "Stages", () => { c.StagingOpen = !c.StagingOpen; Refresh(); }, ButtonStyle.Normal, 22);
+            modeButton = UIFactory.Button(r2, "2D", c.ToggleMode2D, ButtonStyle.Normal, 22);
+            UIFactory.Button(r2, "New", c.NewDesign, ButtonStyle.Normal, 22);
+            UIFactory.Button(r2, "Open", c.OpenLoadDialog, ButtonStyle.Normal, 22);
+            UIFactory.Button(r2, "Save", c.Save, ButtonStyle.Normal, 22);
+        }
+
         void BuildPartsPanel()
         {
             var panel = UIFactory.Card(root, "Parts");
@@ -151,7 +215,7 @@ namespace Apogee.Builder
             UIFactory.Stretch(inner, 10, 10, 10, 10);
             UIFactory.Vertical(inner, 8, 0, true);
 
-            var title = UIFactory.Label(inner, "PARTS  ·  tap, or drag onto the rocket", 20, Theme.Accent, TextAnchor.MiddleLeft, FontStyle.Bold);
+            var title = UIFactory.Label(inner, portrait ? "PARTS  ·  tap or drag" : "PARTS  ·  tap, or drag onto the rocket", 20, Theme.Accent, TextAnchor.MiddleLeft, FontStyle.Bold);
             UIFactory.Size(title, -1, 34);
 
             RectTransform chips;
@@ -161,7 +225,7 @@ namespace Apogee.Builder
             {
                 var cc = cat;
                 var b = UIFactory.Button(chips, PartCatalog.CategoryLabel(cat), () => { category = cc; RebuildPartList(); }, ButtonStyle.Tab, 22);
-                UIFactory.Size(b, 150, 56);
+                UIFactory.Size(b, portrait ? 130 : 150, 56);
                 categoryButtons[cat] = b;
             }
 
@@ -179,7 +243,8 @@ namespace Apogee.Builder
             {
                 var item = UIFactory.Panel(partsContent, Theme.PanelLight, true, "Item_" + def.id);
                 item.sprite = UIFactory.RoundedSmall;
-                UIFactory.Size(item, -1, 112);
+                float itemH = portrait ? 100f : 112f, thumb = portrait ? 84f : 96f;
+                UIFactory.Size(item, -1, itemH);
                 var li = item.gameObject.AddComponent<PartListItem>();
                 li.def = def;
                 li.controller = c;
@@ -188,7 +253,7 @@ namespace Apogee.Builder
                 var thumbBg = UIFactory.Panel(item.transform, new Color(0, 0, 0, 0.35f), true, "ThumbBg");
                 thumbBg.sprite = UIFactory.RoundedSmall;
                 thumbBg.raycastTarget = false;
-                UIFactory.Place(thumbBg.rectTransform, new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(8, 0), new Vector2(96, 96));
+                UIFactory.Place(thumbBg.rectTransform, new Vector2(0, 0.5f), new Vector2(0, 0.5f), new Vector2(8, 0), new Vector2(thumb, thumb));
                 var raw = UIFactory.Rect("Thumb", thumbBg.transform).gameObject.AddComponent<RawImage>();
                 UIFactory.Stretch(raw.rectTransform, 2, 2, 2, 2);
                 raw.raycastTarget = false;
@@ -197,6 +262,16 @@ namespace Apogee.Builder
                 raw.color = tex != null ? Color.white : new Color(1, 1, 1, 0);
                 thumbs[def.id] = raw;
 
+                if (portrait)
+                {
+                    var pname = UIFactory.Label(item.transform, def.displayName, 20, Theme.Text, TextAnchor.MiddleLeft, FontStyle.Bold);
+                    pname.rectTransform.anchorMin = new Vector2(0, 0);
+                    pname.rectTransform.anchorMax = new Vector2(1, 1);
+                    pname.rectTransform.offsetMin = new Vector2(thumb + 16, 6);
+                    pname.rectTransform.offsetMax = new Vector2(-6, -6);
+                    pname.raycastTarget = false;
+                    continue;
+                }
                 var name = UIFactory.Label(item.transform, def.displayName, 23, Theme.Text, TextAnchor.UpperLeft, FontStyle.Bold);
                 name.rectTransform.anchorMin = new Vector2(0, 0);
                 name.rectTransform.anchorMax = new Vector2(1, 1);
@@ -215,11 +290,24 @@ namespace Apogee.Builder
         {
             var panel = UIFactory.Card(root, "Stats");
             var rt = panel.rectTransform;
-            rt.anchorMin = new Vector2(1, 0);
-            rt.anchorMax = new Vector2(1, 1);
-            rt.pivot = new Vector2(1, 0.5f);
-            rt.offsetMin = new Vector2(-Margin - SideW, Margin);
-            rt.offsetMax = new Vector2(-Margin, -Margin * 2 - TopH);
+            statsPanel = rt;
+            if (portrait)
+            {
+                // Overlay above the summary strip, to the right of the parts list; toggled by "Stats".
+                rt.anchorMin = new Vector2(0, 0);
+                rt.anchorMax = new Vector2(1, 1);
+                rt.pivot = new Vector2(0.5f, 0.5f);
+                rt.offsetMin = new Vector2(Margin * 2 + SideW, Margin * 2 + SummaryH);
+                rt.offsetMax = new Vector2(-Margin, -Margin * 2 - TopH);
+            }
+            else
+            {
+                rt.anchorMin = new Vector2(1, 0);
+                rt.anchorMax = new Vector2(1, 1);
+                rt.pivot = new Vector2(1, 0.5f);
+                rt.offsetMin = new Vector2(-Margin - SideW, Margin);
+                rt.offsetMax = new Vector2(-Margin, -Margin * 2 - TopH);
+            }
             var inner = UIFactory.Rect("Inner", panel.transform);
             UIFactory.Stretch(inner, 10, 10, 10, 10);
             UIFactory.Vertical(inner, 4, 0, true);
@@ -229,12 +317,44 @@ namespace Apogee.Builder
             UIFactory.Size(sc, -1, -1, -1, 1);
         }
 
+        /// <summary>Portrait: compact one-line vehicle summary plus a button that opens the full statistics.</summary>
+        void BuildSummaryStrip()
+        {
+            var card = UIFactory.Card(root, "Summary");
+            summaryStrip = card.rectTransform;
+            summaryStrip.anchorMin = new Vector2(0, 0);
+            summaryStrip.anchorMax = new Vector2(1, 0);
+            summaryStrip.pivot = new Vector2(0.5f, 0);
+            summaryStrip.offsetMin = new Vector2(Margin * 2 + SideW, Margin);
+            summaryStrip.offsetMax = new Vector2(-Margin, Margin + SummaryH);
+            var row = UIFactory.Rect("Row", summaryStrip);
+            UIFactory.Stretch(row, 14, 10, 10, 10);
+            var h = UIFactory.Horizontal(row, 10, 0, true);
+            h.childAlignment = TextAnchor.MiddleLeft;
+            summaryText = UIFactory.Label(row, "", 21, Theme.Text);
+            UIFactory.Size(summaryText, 200, -1, 1);
+            statsToggle = UIFactory.Button(row, "Stats", () => { statsOpen = !statsOpen; Refresh(); });
+            UIFactory.Size(statsToggle, 150);
+        }
+
+        void UpdateSummary()
+        {
+            if (summaryText == null) return;
+            var s = c.Stats;
+            if (s == null || s.partCount == 0) { summaryText.text = "<color=#8fa3b8>Add parts to see mass, TWR and Δv.</color>"; return; }
+            string twrCol = !s.hasThrust ? "#8fa3b8" : s.launchTwr >= 1.2f ? "#5fd38d" : s.launchTwr >= 1f ? "#f0c048" : "#ff6b6b";
+            summaryText.text = "Mass <b>" + s.totalMass.ToString("N1") + " t</b>   TWR <b><color=" + twrCol + ">" + (s.hasThrust ? s.launchTwr.ToString("0.00") : "—") + "</color></b>\n" +
+                "Δv <b><color=#7fd4ff>" + s.dvVacTotal.ToString("N0") + " m/s</color></b>   Thrust <b>" + s.launchThrustAsl.ToString("N0") + " kN</b>";
+        }
+
         void BuildBottomBars()
         {
             // Region between the side panels
             emptyHint = UIFactory.Rect("EmptyHint", root);
-            BottomRegion(emptyHint, 120);
-            var hint = UIFactory.Label(emptyHint, "Start by choosing a command part (a capsule or probe core) and tap or drag it onto the platform.\nThen stack tanks below it, add an engine, and watch the numbers on the right.", 26, Theme.Muted, TextAnchor.MiddleCenter);
+            BottomRegion(emptyHint, portrait ? 200 : 120);
+            var hint = UIFactory.Label(emptyHint, portrait
+                ? "Start with a command part (capsule or probe core): tap it, then tap the platform.\nStack tanks below it, add an engine, and check the numbers below."
+                : "Start by choosing a command part (a capsule or probe core) and tap or drag it onto the platform.\nThen stack tanks below it, add an engine, and watch the numbers on the right.", 26, Theme.Muted, TextAnchor.MiddleCenter);
             UIFactory.Stretch(hint.rectTransform);
 
             selectionBar = UIFactory.Card(root, "Selection").rectTransform;
@@ -265,14 +385,14 @@ namespace Apogee.Builder
             UIFactory.Size(head, -1, 64);
             var hrow2 = UIFactory.Horizontal(head, 10, 0, true);
             hrow2.childAlignment = TextAnchor.MiddleLeft;
-            var t = UIFactory.Label(head, "STAGING  ·  fires left to right", 22, Theme.Accent, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UIFactory.Size(t, 200, -1, 1);
-            stageEarlier = UIFactory.Button(head, "Fire earlier", () => { if (c.Selected != null) c.MoveStage(c.SelectedUid, -1); });
-            UIFactory.Size(stageEarlier, 190);
-            stageLater = UIFactory.Button(head, "Fire later", () => { if (c.Selected != null) c.MoveStage(c.SelectedUid, +1); });
-            UIFactory.Size(stageLater, 170);
-            UIFactory.Size(UIFactory.Button(head, "Auto", c.ResetStaging), 110);
-            UIFactory.Size(UIFactory.Button(head, "Close", () => { c.StagingOpen = false; Refresh(); }), 120);
+            var t = UIFactory.Label(head, portrait ? "STAGING" : "STAGING  ·  fires left to right", 22, Theme.Accent, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UIFactory.Size(t, portrait ? 100 : 200, -1, 1);
+            stageEarlier = UIFactory.Button(head, portrait ? "Earlier" : "Fire earlier", () => { if (c.Selected != null) c.MoveStage(c.SelectedUid, -1); });
+            UIFactory.Size(stageEarlier, portrait ? 130 : 190);
+            stageLater = UIFactory.Button(head, portrait ? "Later" : "Fire later", () => { if (c.Selected != null) c.MoveStage(c.SelectedUid, +1); });
+            UIFactory.Size(stageLater, portrait ? 120 : 170);
+            UIFactory.Size(UIFactory.Button(head, "Auto", c.ResetStaging), portrait ? 100 : 110);
+            UIFactory.Size(UIFactory.Button(head, "Close", () => { c.StagingOpen = false; Refresh(); }), portrait ? 110 : 120);
             var colScroll = UIFactory.ScrollList(dInner, out stagingColumns, 10, 2, true);
             UIFactory.Size(colScroll, -1, -1, -1, 1);
         }
@@ -282,15 +402,17 @@ namespace Apogee.Builder
             rt.anchorMin = new Vector2(0, 0);
             rt.anchorMax = new Vector2(1, 0);
             rt.pivot = new Vector2(0.5f, 0);
-            rt.offsetMin = new Vector2(Margin * 2 + SideW, Margin + lift);
-            rt.offsetMax = new Vector2(-Margin * 2 - SideW, Margin + lift + height);
+            float right = portrait ? Margin : Margin * 2 + SideW;
+            float bottom = portrait ? Margin * 2 + SummaryH : Margin;
+            rt.offsetMin = new Vector2(Margin * 2 + SideW, bottom + lift);
+            rt.offsetMax = new Vector2(-right, bottom + lift + height);
         }
 
         // ================================================================== refresh
 
         public void Refresh()
         {
-            if (c == null || c.Bp == null) return;
+            if (c == null || c.Bp == null || nameButton == null) return;
             UIFactory.SetLabel(nameButton, c.Bp.name + (c.Bp.IsEmpty ? "" : "   <size=18><color=#8fa3b8>rename</color></size>"));
             undoButton.interactable = c.CanUndo;
             redoButton.interactable = c.CanRedo;
@@ -314,6 +436,14 @@ namespace Apogee.Builder
             bool showSel = c.Selected != null && !c.IsHolding;
             selectionBar.gameObject.SetActive(showSel);
             if (showSel) RebuildSelection(c.StagingOpen ? 410f : 0f);
+            if (portrait)
+            {
+                bool overlayBusy = c.IsHolding || showSel || c.StagingOpen;
+                if (overlayBusy) statsOpen = false;
+                statsPanel.gameObject.SetActive(statsOpen);
+                UIFactory.SetButtonColor(statsToggle, statsOpen ? Theme.ButtonPrimary : Theme.ButtonBg);
+                UIFactory.SetLabel(statsToggle, statsOpen ? "Close" : "Stats");
+            }
             if (c.StagingOpen) RebuildStaging();
             RebuildStats();
         }
@@ -338,27 +468,46 @@ namespace Apogee.Builder
             int sym = c.Bp.SymmetryMembers(p).Count;
             if (sym > 1) info.Append("  ·  ×").Append(sym).Append(" symmetry");
             info.Append("</color>");
-            var label = UIFactory.Label(selectionBody, info.ToString(), 23, Theme.Text);
-            UIFactory.Size(label, -1, 56);
+            var label = UIFactory.Label(selectionBody, info.ToString(), portrait ? 20 : 23, Theme.Text);
+            UIFactory.Size(label, -1, portrait ? 84 : 56);
 
-            var row = UIFactory.Rect("Tools", selectionBody);
-            UIFactory.Size(row, -1, 78);
-            var hl = UIFactory.Horizontal(row, 8, 0, true);
-            hl.childForceExpandWidth = true;
-            UIFactory.Button(row, "Move", c.MoveSelected);
-            UIFactory.Button(row, "Rotate", c.RotateSelected);
+            var tools = new List<KeyValuePair<string, System.Action>>();
+            tools.Add(new KeyValuePair<string, System.Action>("Move", c.MoveSelected));
+            tools.Add(new KeyValuePair<string, System.Action>("Rotate", c.RotateSelected));
             if (def.resizableDiameter)
             {
-                UIFactory.Button(row, "Wider", () => c.ResizeSelected(+1));
-                UIFactory.Button(row, "Narrower", () => c.ResizeSelected(-1));
+                tools.Add(new KeyValuePair<string, System.Action>("Wider", () => c.ResizeSelected(+1)));
+                tools.Add(new KeyValuePair<string, System.Action>("Narrower", () => c.ResizeSelected(-1)));
             }
             if (def.resizableLength)
             {
-                UIFactory.Button(row, "Longer", () => c.StretchSelected(+1));
-                UIFactory.Button(row, "Shorter", () => c.StretchSelected(-1));
+                tools.Add(new KeyValuePair<string, System.Action>("Longer", () => c.StretchSelected(+1)));
+                tools.Add(new KeyValuePair<string, System.Action>("Shorter", () => c.StretchSelected(-1)));
             }
-            UIFactory.Button(row, "Duplicate", c.DuplicateSelected);
-            UIFactory.Button(row, "Delete", c.DeleteSelected, ButtonStyle.Danger);
+            tools.Add(new KeyValuePair<string, System.Action>("Duplicate", c.DuplicateSelected));
+            tools.Add(new KeyValuePair<string, System.Action>("Delete", c.DeleteSelected));
+
+            int perRow = portrait ? 4 : tools.Count;
+            int rows = (tools.Count + perRow - 1) / perRow;
+            if (portrait) BottomRegion(selectionBar, h + 28f + (rows - 1) * 76f, lift);
+            for (int r = 0; r < rows; r++)
+            {
+                var row = UIFactory.Rect("Tools" + r, selectionBody);
+                UIFactory.Size(row, -1, portrait ? 68 : 78);
+                var hl = UIFactory.Horizontal(row, 8, 0, true);
+                hl.childForceExpandWidth = true;
+                for (int i = r * perRow; i < Mathf.Min(tools.Count, (r + 1) * perRow); i++)
+                {
+                    bool del = tools[i].Key == "Delete";
+                    UIFactory.Button(row, tools[i].Key, tools[i].Value, del ? ButtonStyle.Danger : ButtonStyle.Normal, portrait ? 22 : 26);
+                }
+                // keep the last row's buttons the same width as full rows
+                if (portrait) for (int k = tools.Count; k < (r + 1) * perRow && r == rows - 1; k++)
+                {
+                    var spacer = UIFactory.Rect("Spacer", row);
+                    spacer.gameObject.AddComponent<LayoutElement>();
+                }
+            }
 
             if (def.isPayload)
             {
@@ -424,6 +573,8 @@ namespace Apogee.Builder
 
         void RebuildStats()
         {
+            if (statsContent == null) return;
+            UpdateSummary();
             for (int i = statsContent.childCount - 1; i >= 0; i--) Destroy(statsContent.GetChild(i).gameObject);
             var s = c.Stats;
             if (s == null || s.partCount == 0)

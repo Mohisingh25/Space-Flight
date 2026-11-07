@@ -10,6 +10,10 @@ the project, mobile rendering setup, main menu and a working modular rocket buil
 
 ---
 
+## Orientation
+
+The game runs in **portrait and landscape** and re-lays out every screen when the phone rotates (auto-rotate; upside-down portrait is disabled). On Mac, resizing the window to taller-than-wide switches to the portrait layout.
+
 ## Get the APK (no Unity install needed for building)
 
 The workflow in `.github/workflows/build-android.yml` builds the APK on GitHub's servers with
