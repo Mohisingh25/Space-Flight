@@ -1,0 +1,86 @@
+# Builds the Android APK in the cloud with GameCI (Unity in Docker).
+# Needs three repository secrets: UNITY_LICENSE, UNITY_EMAIL, UNITY_PASSWORD.
+# The APK is attached to each run under "Artifacts".
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      development:
+        description: "Development (debug) build"
+        type: boolean
+        default: false
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Check Unity secrets
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        run: |
+          missing=""
+          [ -z "$UNITY_LICENSE" ] && missing="$missing UNITY_LICENSE"
+          [ -z "$UNITY_EMAIL" ] && missing="$missing UNITY_EMAIL"
+          [ -z "$UNITY_PASSWORD" ] && missing="$missing UNITY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Free disk space (Unity Android image is large)
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          swap-storage: false
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: false
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-Android-
+
+      - name: Build with Unity
+        uses: game-ci/unity-builder@v4
+        env:
+          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+        with:
+          targetPlatform: Android
+          unityVersion: auto
+          buildName: Apogee
+          buildMethod: Apogee.EditorTools.BuildScript.BuildCI
+          androidExportType: androidPackage
+          versioning: None
+          customParameters: ${{ inputs.development && '-apogeeDev' || '' }}
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Apogee-Android-APK
+          path: build/Android/*.apk
+          if-no-files-found: error
+          retention-days: 30
