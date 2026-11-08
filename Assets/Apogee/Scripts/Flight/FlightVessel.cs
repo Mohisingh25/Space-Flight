@@ -102,6 +102,10 @@ namespace Apogee.Flight
         public readonly HashSet<int> chutesDeployed = new HashSet<int>();
         public readonly Dictionary<int, float> temperature = new Dictionary<int, float>();
         public readonly Dictionary<int, float> engineOutput = new Dictionary<int, float>();
+        public readonly Dictionary<int, float> spool = new Dictionary<int, float>();        // 0..1 turbopump spool-up per engine
+        public readonly Dictionary<int, float> thrustLimit = new Dictionary<int, float>();  // per-engine thrust limiter 0.2..1
+
+        public float ThrustLimit(int uid) { float l; return thrustLimit.TryGetValue(uid, out l) ? l : 1f; }
         public readonly Dictionary<int, float> rcsOutput = new Dictionary<int, float>();
         readonly Dictionary<int, double> poolFlow = new Dictionary<int, double>();
         readonly Dictionary<int, double> engineFlow = new Dictionary<int, double>();
@@ -532,7 +536,7 @@ namespace Apogee.Flight
                 if (!d.IsEngine || d.isRcs || engineOff.Contains(u)) continue;
                 if (!state.ignited.Contains(u)) continue;
                 if (state.PoolFuel(state.PoolKey(u, fuelGroups), fuelGroups) <= 1e-5f) continue;
-                F += d.thrustVac * Math.Max(0.05, (d.ispVac + (d.ispSL - d.ispVac) * pr) / d.ispVac);
+                F += d.thrustVac * (d.solidFuel ? 1f : ThrustLimit(u)) * Math.Max(0.05, (d.ispVac + (d.ispSL - d.ispVac) * pr) / d.ispVac);
             }
             return F;
         }
@@ -760,11 +764,15 @@ namespace Apogee.Flight
 
         float Fuel(int u) { float f; state.fuel.TryGetValue(u, out f); return f; }
 
+        bool AnySpooling() { foreach (var v in spool.Values) if (v > 1e-3f) return true; return false; }
+
         bool AnyEngineBurning()
         {
             foreach (int u in state.ignited)
             {
                 if (!state.alive.Contains(u) || engineOff.Contains(u)) continue;
+                var d = state.byUid[u].Def;
+                if (!d.solidFuel && (!enginesOn || throttle <= 0.001f || ThrustLimit(u) <= 0f)) continue;
                 if (state.PoolFuel(state.PoolKey(u, fuelGroups), fuelGroups) > 1e-5f) return true;
             }
             return false;
@@ -775,8 +783,10 @@ namespace Apogee.Flight
         {
             UpdateTransfer(dt);
             if (status == FlightStatus.Crashed) { time += dt; StepDebris(dt); return; }
-            if (Grounded && !(enginesOn && AnyEngineBurning() && status != FlightStatus.Rollout))
+            if (Grounded && !(enginesOn && AnyEngineBurning() && status != FlightStatus.Rollout) && !AnySpooling())
             {
+                engineOutput.Clear();
+                spool.Clear();
                 time += dt;
                 SyncToSurface();
                 StepDebris(dt);
@@ -784,6 +794,10 @@ namespace Apogee.Flight
             }
             if (CanRails && status == FlightStatus.Flying && dt > 0.05)
             {
+                // let engines finish winding down with real physics, then go on rails
+                while (AnySpooling() && dt > 0.02 && status == FlightStatus.Flying) { Step(0.02); dt -= 0.02; }
+                engineOutput.Clear();
+                spool.Clear();
                 Rails(dt);
                 StepDebris(dt);
                 return;
@@ -804,28 +818,33 @@ namespace Apogee.Flight
         {
             double rem = dt;
             int guard = 0;
-            while (rem > 1e-6 && guard++ < 4000)
+            while (rem > 1e-6 && guard++ < 20000)
             {
                 var o = CurrentOrbit;
-                double h = rem;
-                double speed = vel.magnitude + 1;
-                // distance to the nearest sphere-of-influence boundary or atmosphere / ground
-                double margin = double.MaxValue;
-                if (body.parent != null) margin = Math.Min(margin, body.soi - pos.magnitude);
+                // time until the next event that needs physics: entering the atmosphere / nearing the ground
+                // (only when actually descending) or crossing a sphere-of-influence boundary
+                double tEvent = double.MaxValue;
+                double r = pos.magnitude, vr = Vector3d.Dot(vel, pos) / r;
+                double floor = body.radius + (body.HasAtmosphere ? body.atmosphere.height : 2000);
+                if (vr < 0) tEvent = Math.Min(tEvent, (r - floor) / -vr);
+                if (body.parent != null && vr > 0) tEvent = Math.Min(tEvent, (body.soi - r) / vr);
                 foreach (var c in body.children)
                 {
-                    var rel = pos - c.LocalPosition(time);
-                    margin = Math.Min(margin, rel.magnitude - c.soi);
+                    Vector3d cr, cv;
+                    c.LocalState(time, out cr, out cv);
+                    var rel = pos - cr;
+                    double closing = -Vector3d.Dot(vel - cv, rel) / rel.magnitude;
+                    double gap = rel.magnitude - c.soi;
+                    tEvent = Math.Min(tEvent, closing > 0 ? gap / closing : gap / ((vel - cv).magnitude + 1) * 4);
                 }
-                double floor = body.radius + (body.HasAtmosphere ? body.atmosphere.height : 2000);
-                margin = Math.Min(margin, pos.magnitude - floor);
-                h = Math.Min(h, Math.Max(1.0, 0.3 * margin / speed));
+                double h = Math.Min(rem, Math.Max(1.0, 0.3 * tEvent));
                 time += h;
                 rem -= h;
                 o.StateAt(time, out pos, out vel);
                 rot = rot * Quaternion.Euler(angVel * (float)(h * Mathf.Rad2Deg));
                 CheckSoi();
-                if (pos.magnitude < floor) break; // entering atmosphere/near ground: hand back to physics
+                double fl = body.radius + (body.HasAtmosphere ? body.atmosphere.height : 2000);
+                if (pos.magnitude < fl) break; // entering atmosphere/near ground: hand back to physics
             }
             if (rem > 1e-6) { double r = rem; while (r > 1e-9) { double hh = Math.Min(0.02, r); Step(hh); r -= hh; } }
         }
@@ -887,13 +906,20 @@ namespace Apogee.Flight
             double tMul = cheats.superThrust ? 5.0 : 1.0;
             foreach (int u in state.ignited)
             {
-                if (!state.alive.Contains(u) || engineOff.Contains(u)) continue;
+                if (!state.alive.Contains(u)) continue;
                 var d = state.byUid[u].Def;
                 if (d.isRcs) continue;
-                float thr = d.solidFuel ? 1f : (enginesOn && throttle > 0.001f ? Mathf.Max(throttle, d.minThrottle) : 0f);
-                if (thr <= 0f) continue;
                 int key = state.PoolKey(u, fuelGroups);
-                if (state.PoolFuel(key, fuelGroups) <= 1e-5f) continue;
+                bool fed = state.PoolFuel(key, fuelGroups) > 1e-5f;
+                float want = !fed || engineOff.Contains(u) ? 0f : d.solidFuel ? 1f : (enginesOn && throttle > 0.001f ? Mathf.Max(throttle, d.minThrottle) : 0f);
+                if (!d.solidFuel) want *= ThrustLimit(u);
+                // Real engines take ~2 s to spool up through their start sequence and a fraction of a second to cut off.
+                float sp; spool.TryGetValue(u, out sp);
+                float rate = d.solidFuel ? 20f : want > sp ? 0.55f : 7f;
+                sp = Mathf.MoveTowards(sp, want, (float)(rate * dt));
+                spool[u] = sp;
+                if (sp <= 1e-3f || !fed) continue;
+                float thr = sp;
                 double flow = d.thrustVac / (d.ispVac * G0) * thr;
                 double isp = Math.Max(d.ispVac * 0.05, d.ispVac + (d.ispSL - d.ispVac) * pr);
                 double Fi = flow * isp * G0 * tMul;

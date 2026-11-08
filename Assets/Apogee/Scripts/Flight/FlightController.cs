@@ -111,10 +111,39 @@ namespace Apogee.Flight
         System.Collections.Generic.List<int> engines;
         bool enginePanelOpen;
 
+        readonly System.Collections.Generic.HashSet<int> disarmed = new System.Collections.Generic.HashSet<int>();
+        static readonly float[] Limits = { 1f, 0.8f, 0.6f, 0.4f, 0.2f };
+
+        bool PreLaunch { get { return (vessel.status == FlightStatus.Rollout || vessel.status == FlightStatus.OnPad) && !staged0; } }
+
+        void EngineLimit(int i)
+        {
+            if (i < 0 || i >= engines.Count) return;
+            int uid = engines[i];
+            var d = vessel.state.byUid[uid].Def;
+            if (d.solidFuel) { hud.Message("Solid motors burn at a fixed thrust", 1.6f); return; }
+            float cur = vessel.ThrustLimit(uid);
+            int k = 0;
+            for (int j = 0; j < Limits.Length; j++) if (Mathf.Abs(Limits[j] - cur) < 0.01f) k = j;
+            float next = Limits[(k + 1) % Limits.Length];
+            vessel.thrustLimit[uid] = next;
+            hud.Message("Engine " + (i + 1) + " thrust limited to " + Mathf.RoundToInt(next * 100) + "% (" + (d.thrustSL * next).ToString("N0") + " kN at sea level)", 2f);
+            Click();
+        }
+
         void EngineRow(int i)
         {
             if (i < 0 || i >= engines.Count) return;
             int uid = engines[i];
+            if (PreLaunch)
+            {
+                var p = vessel.state.byUid[uid];
+                if (p.stage > 0) { hud.Message("Engine " + (i + 1) + " fires later, with stage " + (p.stage + 1), 2f); return; }
+                if (!disarmed.Remove(uid)) disarmed.Add(uid);
+                hud.Message("Engine " + (i + 1) + (disarmed.Contains(uid) ? " SAFE — it will not light at launch" : " ARMED for launch"), 1.8f);
+                Click();
+                return;
+            }
             var st = vessel.GetEngineState(uid);
             if (st == FlightVessel.EngineState.Gone) return;
             string msg = vessel.SetEngine(uid, st != FlightVessel.EngineState.Running);
@@ -124,6 +153,13 @@ namespace Apogee.Flight
 
         void AllEngines(bool on)
         {
+            if (PreLaunch)
+            {
+                foreach (int uid in engines) if (vessel.state.byUid[uid].stage <= 0) { if (on) disarmed.Remove(uid); else disarmed.Add(uid); }
+                hud.Message(on ? "All launch engines ARMED" : "All launch engines SAFE", 1.6f);
+                Click();
+                return;
+            }
             int n = 0;
             foreach (int uid in engines)
             {
@@ -139,7 +175,7 @@ namespace Apogee.Flight
 
         void UpdateEnginePanel()
         {
-            bool open = enginePanelOpen && !map.Active && hud.controls.gameObject.activeSelf;
+            bool open = enginePanelOpen && !map.Active && vessel.status != FlightStatus.Crashed;
             hud.enginePanel.gameObject.SetActive(open);
             hud.engineLabels.gameObject.SetActive(open);
             hud.telemetry.transform.parent.gameObject.SetActive(!open);
@@ -153,6 +189,15 @@ namespace Apogee.Flight
                 var st = vessel.GetEngineState(uid);
                 var row = hud.engineRows[i];
                 string state; Color col;
+                var pp = vessel.state.byUid[uid];
+                if (PreLaunch)
+                {
+                    if (pp.stage > 0) { state = "<color=#8fa3b8>STAGE " + (pp.stage + 1) + "</color>"; col = Theme.ButtonBg; }
+                    else if (disarmed.Contains(uid)) { state = "<color=#ff9a7d>SAFE</color>"; col = Theme.ButtonBg; }
+                    else { state = "<color=#7dff9a>ARMED</color>"; col = new Color(0.12f, 0.32f, 0.18f, 1f); }
+                    st = FlightVessel.EngineState.Ready;
+                }
+                else
                 switch (st)
                 {
                     case FlightVessel.EngineState.Running: state = "<color=#7dff9a>ON</color>"; col = new Color(0.12f, 0.32f, 0.18f, 1f); break;
@@ -163,7 +208,8 @@ namespace Apogee.Flight
                 }
                 float o; vessel.engineOutput.TryGetValue(uid, out o);
                 var p = vessel.state.byUid[uid];
-                UIFactory.SetLabel(row, "<b>" + (i + 1) + "</b>  " + p.Def.displayName + "   " + state + (o > 0 ? "  " + Mathf.RoundToInt(o * 100) + "%" : ""));
+                UIFactory.SetLabel(row, "<b>" + (i + 1) + "</b>  " + p.Def.displayName + "   " + state + (o > 0 ? "  " + (p.Def.thrustVac * o).ToString("N0") + " kN" : ""));
+                UIFactory.SetLabel(hud.engineLimits[i], p.Def.solidFuel ? "fixed" : Mathf.RoundToInt(vessel.ThrustLimit(uid) * 100) + "%");
                 UIFactory.SetButtonColor(row, col);
                 // number tag next to the engine in 3D
                 var holder = (RectTransform)hud.engineTags[i].transform.parent;
@@ -265,6 +311,7 @@ namespace Apogee.Flight
             hud.OnSkipRollout = () => { crawlerEast = 0f; Click(); };
             hud.OnEngineTab = () => { enginePanelOpen = !enginePanelOpen; Click(); };
             hud.OnEngineRow = EngineRow;
+            hud.OnEngineLimit = EngineLimit;
             hud.OnAllEngines = AllEngines;
             hud.OnSpeed = () => { speedIndex = (speedIndex + 1) % RolloutSpeeds.Length; UIFactory.SetLabel(hud.speedButton, "×" + RolloutSpeeds[speedIndex]); Click(); };
             hud.OnSas = m => { vessel.sas = vessel.sas == m ? SasMode.Off : m; if (m == SasMode.Target && vessel.target == null) hud.Message("Pick a target in the map first", 2f); Click(); };
@@ -552,7 +599,8 @@ namespace Apogee.Flight
                     staged0 = true;
                     vessel.holdDown = true;
                     vessel.Stage();
-                    hud.Message("Ignition", 2f);
+                    foreach (int uid in disarmed) vessel.SetEngine(uid, false);
+                    hud.Message(disarmed.Count > 0 ? "Ignition — " + disarmed.Count + " engine(s) kept safe" : "Ignition sequence start", 2f);
                 }
                 if (countdown <= 0f)
                 {
@@ -581,7 +629,7 @@ namespace Apogee.Flight
                         ? "<b>ROLLOUT</b> — crawler-transporter to Pad 1\n" + Mathf.RoundToInt(crawlerEast) + " m to go · " +
                           (hud.drive.Held || Input.GetKey(KeyCode.F) ? (CrawlerRealSpeed * RolloutSpeeds[speedIndex] * 3.6f).ToString("0.0") + " km/h" + (speedIndex == 0 ? " (real speed)" : " (real 1.6 km/h, ×" + RolloutSpeeds[speedIndex] + ")") + " · ETA " + FlightHUD.FormatTime(crawlerEast / (CrawlerRealSpeed * RolloutSpeeds[speedIndex])) : "stopped")
                         : "Lowering onto the hold-down clamps…")
-                    : "<b>ON THE PAD</b> — " + launchBlueprint.name + "\n" + v.mass.ToString("N1") + " t · thrust " + v.MaxThrustNow().ToString("N0") + " kN";
+                    : "<b>ON THE PAD</b> — " + launchBlueprint.name + "\n" + LaunchSummary() + "\n<size=18>Tap ENGINES ▸ to choose which engines light and their thrust</size>";
                 hud.rolloutText.supportRichText = true;
             }
             hud.countdownText.text = countdown >= 0f ? (countdown > 0.5f ? "T−" + Mathf.CeilToInt(countdown) : "LIFTOFF") : "";
@@ -651,6 +699,22 @@ namespace Apogee.Flight
             hud.navInfo.text = nav.ToString();
             if (world.camMode == CamMode.Cockpit)
                 hud.cockpitInstruments.text = "ALT " + FlightHUD.Dist(alt) + "   V/S " + v.VerticalSpeed.ToString("N0") + "   SPD " + v.SurfaceVelocity.magnitude.ToString("N0") + "   THR " + Mathf.RoundToInt(v.throttle * 100) + "%";
+        }
+
+        /// <summary>Liftoff thrust of the armed launch engines vs the rocket's weight.</summary>
+        string LaunchSummary()
+        {
+            double F = 0;
+            foreach (int uid in engines)
+            {
+                var p = vessel.state.byUid[uid];
+                if (p.stage > 0 || disarmed.Contains(uid)) continue;
+                F += p.Def.thrustSL * (p.Def.solidFuel ? 1f : vessel.ThrustLimit(uid));
+            }
+            double w = vessel.mass * 9.80665;
+            double twr = F / w;
+            string col = twr > 1.15 ? "#7dff9a" : twr > 1.0 ? "#ffd27d" : "#ff7d7d";
+            return vessel.mass.ToString("N1") + " t · liftoff thrust " + F.ToString("N0") + " kN (" + (F / 9.80665).ToString("N0") + " t) · <color=" + col + ">TWR " + twr.ToString("0.00") + (twr <= 1.0 ? " — too heavy to lift off" : "") + "</color>";
         }
 
         string StatusText()

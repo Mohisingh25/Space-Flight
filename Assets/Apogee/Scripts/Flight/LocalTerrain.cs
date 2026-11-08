@@ -46,7 +46,7 @@ namespace Apogee.Flight
             }
             var spin = b.Spin(t);
             var subFixed = Vector3d.Rotate(Quaternion.Inverse(spin), originFrame).normalized;
-            double want = System.Math.Max(25000, System.Math.Min(700000, alt * 4.5 + 20000));
+            double want = System.Math.Max(60000, System.Math.Min(800000, alt * 5 + 60000));
             bool rebuild = body != b || mesh.vertexCount == 0
                 || Vector3d.Angle(subFixed, centerFixed) * b.radius > patchRadius * 0.18
                 || want > patchRadius * 1.6 || want < patchRadius * 0.4;
@@ -73,11 +73,12 @@ namespace Apogee.Flight
             centerFixed = center;
             centerRadius = b.radius + b.TerrainHeight(center);
             patchRadius = radius;
-            var east = Vector3d.Cross(Vector3d.up, center);
+            // true east (direction of increasing longitude) and north, so triangles face up like the site's own ground
+            var east = Vector3d.Cross(center, Vector3d.up);
             if (east.magnitude < 1e-6) east = new Vector3d(1, 0, 0);
             east = east.normalized;
-            var north = Vector3d.Cross(center, east).normalized;
-            int rings = 60, segs = 96;
+            var north = Vector3d.Cross(east, center).normalized;
+            int rings = 72, segs = 112;
             var verts = new List<Vector3>();
             var uv = new List<Vector2>();
             var uv2 = new List<Vector2>();
@@ -94,7 +95,7 @@ namespace Apogee.Flight
                     double th = j / (double)segs * System.Math.PI * 2;
                     var tangent = east * System.Math.Cos(th) + north * System.Math.Sin(th);
                     var dir = (center * System.Math.Cos(ang) + tangent * System.Math.Sin(ang)).normalized;
-                    double h = b.radius + b.TerrainHeight(dir);
+                    double h = b.radius + b.TerrainHeight(dir) - (b.name == "Earth" ? 0.6 : 0.0);   // just under the launch site's own ground
                     // drop the far rim below the horizon to hide the edge against the scaled planet
                     if (i == rings) h -= radius * 0.02;
                     verts.Add((dir * h - centerPoint).ToFloat());

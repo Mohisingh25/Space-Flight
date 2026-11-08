@@ -14,6 +14,7 @@ Shader "Apogee/Terrain"
     SubShader
     {
         Tags { "RenderType" = "Opaque" "Queue" = "Geometry" }
+        Cull Off
         Pass
         {
             CGPROGRAM
@@ -42,8 +43,12 @@ Shader "Apogee/Terrain"
             float4 frag (v2f i) : SV_Target
             {
                 float3 n = normalize(i.n);
+                float3 toCam = normalize(_WorldSpaceCameraPos - i.wp);
+                if (dot(n, toCam) < 0) n = -n;                       // robust to winding: always light the visible side
                 float3 L = normalize(_SunDir.xyz);
                 float3 alb = tex2D(_MainTex, i.uv).rgb * _Tint.rgb;
+                // orbital imagery is dark and hazy-free; lift it to how the ground looks from low altitude
+                alb = saturate(pow(alb, 0.8) * 1.35);
                 float d1 = tex2D(_DetailTex, i.duv).r;
                 float d2 = tex2D(_DetailTex, i.duv * 0.071).r;
                 float d3 = tex2D(_DetailTex, i.duv * 0.0049).r;

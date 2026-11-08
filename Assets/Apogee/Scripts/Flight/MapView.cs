@@ -243,6 +243,7 @@ namespace Apogee.Flight
             var q = Quaternion.Euler(pitch, yaw, 0f);
             double metersPerUnit = viewDistance / 100.0;
             var camAbs = focusAbs + Vector3d.Rotate(q, new Vector3d(0, 0, -viewDistance));
+            space.SetSky(Vector3.up, Vector3.up, Color.black, Color.black, Color.black, Color.black, 0f);
             space.Render(camAbs, q, 50f, t, metersPerUnit, 1f, Color.black, 0.35f);
 
             // labels

@@ -266,6 +266,18 @@ namespace Apogee.Flight
         /// Draws the Solar System from viewpoint 'viewerAbs' (heliocentric, m) with camera rotation 'rotation'.
         /// 'metersPerUnit' sets the scale (1e5 in flight: 1 unit = 100 km).
         /// </summary>
+        /// <summary>Sky dome parameters for the viewer's location (set by the flight renderer; map view leaves it in space).</summary>
+        public void SetSky(Vector3 up, Vector3 sunDir, Color zenith, Color horizon, Color ground, Color sunGlow, float atmosphere)
+        {
+            skyMat.SetVector("_Up", up);
+            skyMat.SetVector("_SunDir", sunDir);
+            skyMat.SetColor("_Zenith", zenith);
+            skyMat.SetColor("_Horizon", horizon);
+            skyMat.SetColor("_Ground", ground);
+            skyMat.SetColor("_SunGlow", sunGlow);
+            skyMat.SetFloat("_AtmoAmount", atmosphere);
+        }
+
         public void Render(Vector3d viewerAbs, Quaternion rotation, float fov, double t, double metersPerUnit, float starBrightness, Color background, float lineWidthAtUnit)
         {
             camAbs = viewerAbs;

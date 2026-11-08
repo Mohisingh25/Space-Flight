@@ -61,6 +61,8 @@ namespace Apogee.Flight
         public Button countdownButton, skipButton, speedButton, engineTab;
         public RectTransform enginePanel, engineList, engineLabels;
         public readonly List<Button> engineRows = new List<Button>();
+        public readonly List<Button> engineLimits = new List<Button>();
+        public Action<int> OnEngineLimit;
         public readonly List<Text> engineTags = new List<Text>();
         public Action<int> OnEngineRow;
         public Action<bool> OnAllEngines;
@@ -204,11 +206,11 @@ namespace Apogee.Flight
             // ---- engine panel (right): numbered engines, each switchable on/off
             engineLabels = UIFactory.Rect("Engine Numbers", root);
             UIFactory.Stretch(engineLabels);
-            engineTab = Btn("ENGINES ▸", () => Call(OnEngineTab), new Vector2(1, 0), new Vector2(-20, 480), new Vector2(210, 64), 22, controls);
-            var ep = UIFactory.Panel(controls, new Color(0.03f, 0.05f, 0.08f, 0.88f), true, "Engines");
+            engineTab = Btn("ENGINES ▸", () => Call(OnEngineTab), new Vector2(1, 0), new Vector2(-20, 480), new Vector2(210, 64), 22, root);
+            var ep = UIFactory.Panel(root, new Color(0.03f, 0.05f, 0.08f, 0.88f), true, "Engines");
             ep.sprite = UIFactory.RoundedSmall;
             enginePanel = ep.rectTransform;
-            UIFactory.Place(enginePanel, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-20, 556), new Vector2(430, 520));
+            UIFactory.Place(enginePanel, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-20, 556), new Vector2(520, 520));
             var col = UIFactory.Rect("Col", enginePanel);
             UIFactory.Stretch(col, 12, 12, 12, 12);
             UIFactory.Vertical(col, 8, 0, true);
@@ -344,15 +346,23 @@ namespace Apogee.Flight
         /// <summary>Rebuilds the engine rows: "1  Kestrel · S1  [ON]".</summary>
         public void BuildEngineRows(List<string> names)
         {
-            foreach (var b in engineRows) if (b != null) Destroy(b.gameObject);
+            foreach (var b in engineRows) if (b != null) Destroy(b.transform.parent.gameObject);
+            engineLimits.Clear();
             foreach (var t in engineTags) if (t != null) Destroy(t.gameObject);
             engineRows.Clear();
             engineTags.Clear();
             for (int i = 0; i < names.Count; i++)
             {
                 int idx = i;
-                var b = UIFactory.Button(engineList, names[i], () => { if (OnEngineRow != null) OnEngineRow(idx); }, ButtonStyle.Normal, 20);
-                UIFactory.Size(b, -1, 60);
+                var rowRt = UIFactory.Rect("Row " + (i + 1), engineList);
+                UIFactory.Size(rowRt, -1, 60);
+                var hl = UIFactory.Horizontal(rowRt, 6, 0, true);
+                hl.childForceExpandWidth = false;
+                var b = UIFactory.Button(rowRt, names[i], () => { if (OnEngineRow != null) OnEngineRow(idx); }, ButtonStyle.Normal, 20);
+                UIFactory.Size(b, 200, -1, 1);
+                var lim = UIFactory.Button(rowRt, "100%", () => { if (OnEngineLimit != null) OnEngineLimit(idx); }, ButtonStyle.Normal, 19);
+                UIFactory.Size(lim, 96);
+                engineLimits.Add(lim);
                 b.GetComponentInChildren<Text>().alignment = TextAnchor.MiddleLeft;
                 b.GetComponentInChildren<Text>().supportRichText = true;
                 engineRows.Add(b);

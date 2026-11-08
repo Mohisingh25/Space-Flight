@@ -10,6 +10,14 @@ the project, mobile rendering setup, main menu and a working modular rocket buil
 
 ---
 
+## Phase 4.2 — fixes
+
+- Engines switched off really stop (thrust, flame and sound); engines spool up over ~2 s and cut off in a fraction of a second, like real turbopump engines.
+- Pre-launch engine selection: ENGINES panel → each launch engine ARMED / SAFE, plus a per-engine thrust limiter (100/80/60/40/20 %); the pad screen shows liftoff thrust and TWR. Limiters also work in flight.
+- Blue sky: real gradient (deep blue overhead, pale horizon, glow around the Sun, sunset colours) that darkens to black as you climb; stars appear only at night or in space.
+- Ground everywhere: the terrain around the rocket is the real Earth map (lit correctly, brighter), out to the horizon, wherever you fly or land.
+- Faster, exact time warp (no drift).
+
 ## Phase 4.1 — launch site, clouds, engine panel
 
 - **Space centre:** tropical grassland with ~900 palms and trees, gravel crawlerway with lamp posts, roads and car park, propellant storage spheres with feed lines to the pad, control centre, hangars, perimeter fence, lightning masts.

@@ -519,22 +519,29 @@ namespace Apogee.Flight
             UpdateDebris();
             UpdateCamera(dt, up);
 
-            // atmosphere colour and light
+            // atmosphere colour and light: blue sky by day at the ground, fading to black with altitude
             double alt = v.Altitude;
-            float day = Mathf.Clamp01(Vector3.Dot(up, sunDir) * 3f + 0.25f);
-            Color sky = Color.black;
-            float stars = 1f;
-            float haze = 0f;
+            float sunUp = Vector3.Dot(up, sunDir);
+            float day = Mathf.Clamp01(sunUp * 3f + 0.25f);
+            Color sky = Color.black, zenith = Color.black, horizon = Color.black, ground = Color.black;
+            float stars = 1f, haze = 0f, atmo = 0f;
             if (b.HasAtmosphere && alt < b.atmosphere.height)
             {
                 float thick = Mathf.Clamp01((float)(b.atmosphere.Pressure(alt) / b.atmosphere.p0));
-                float k = Mathf.Pow(thick, 0.35f);
-                sky = b.atmosphere.skyColor * k * day;
-                sky = Color.Lerp(sky, new Color(0.95f, 0.5f, 0.25f) * k, Mathf.Clamp01(1f - Mathf.Abs(Vector3.Dot(up, sunDir)) * 5f) * 0.4f * k);
-                stars = Mathf.Clamp01(1f - k * day * 3f);
+                float k = Mathf.Pow(thick, 0.3f);                 // ~1 at the ground, ~0.3 at 30 km, 0 in space
+                atmo = Mathf.Clamp01(k * 1.15f) * Mathf.Clamp01(day * 1.2f);
+                var baseSky = b.atmosphere.skyColor;
+                zenith = Color.Lerp(new Color(0.02f, 0.03f, 0.1f), baseSky * 0.72f, k);
+                horizon = Color.Lerp(baseSky * 0.6f, Color.Lerp(baseSky, Color.white, 0.55f), k);
+                float dusk = Mathf.Clamp01(1f - Mathf.Abs(sunUp) * 4f);
+                horizon = Color.Lerp(horizon, new Color(1f, 0.55f, 0.28f), dusk * 0.6f);
+                ground = Color.Lerp(horizon, new Color(0.45f, 0.5f, 0.55f), 0.4f);
+                sky = horizon * atmo;
+                stars = Mathf.Clamp01(1f - atmo * 1.6f);
                 haze = 0.000012f * thick;
             }
-            sun.intensity = Mathf.Lerp(0.05f, 1.25f, Mathf.Clamp01(Vector3.Dot(up, sunDir) * 4f + 0.6f));
+            space.SetSky(up, sunDir, zenith, horizon, ground, Color.Lerp(new Color(1f, 0.6f, 0.3f), new Color(1f, 0.95f, 0.85f), Mathf.Clamp01(sunUp * 3f)) * atmo, atmo);
+            sun.intensity = Mathf.Lerp(0.05f, 1.25f, Mathf.Clamp01(sunUp * 4f + 0.6f));
             RenderSettings.ambientLight = Color.Lerp(new Color(0.05f, 0.05f, 0.07f), new Color(0.45f, 0.5f, 0.6f), day * (b.HasAtmosphere ? 1f : 0.25f));
 
             // local ground and launch site
@@ -542,7 +549,6 @@ namespace Apogee.Flight
             if (b == site.Body) site.Place(t, v.pos); else site.gameObject.SetActive(false);
 
             // weather and the sound barrier
-            float sunUp = Vector3.Dot(up, sunDir);
             Color sunCol = Color.Lerp(new Color(1f, 0.55f, 0.3f), new Color(1f, 0.97f, 0.92f), Mathf.Clamp01(sunUp * 4f));
             clouds.UpdateField(b, v.pos, t, sunDir, sunCol * Mathf.Clamp01(sunUp * 3f + 0.4f), Color.Lerp(new Color(0.08f, 0.09f, 0.12f), new Color(0.55f, 0.62f, 0.72f), day));
             double mach = v.Mach;
