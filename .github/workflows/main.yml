@@ -1,7 +1,4 @@
-# Builds the Android APK in the cloud with GameCI (Unity in Docker).
-# Needs three repository secrets: UNITY_LICENSE, UNITY_EMAIL, UNITY_PASSWORD.
-# The APK is attached to each run under "Artifacts".
-name: Build Android APK
+name: Build Android APK + macOS DMG
 
 on:
   push:
@@ -14,31 +11,21 @@ on:
         default: false
 
 concurrency:
-  group: android-${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
+  UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
+  UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
+
 jobs:
-  build:
-    name: Build APK
+  android:
+    name: Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
-      - name: Check Unity secrets
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
-        run: |
-          missing=""
-          [ -z "$UNITY_LICENSE" ] && missing="$missing UNITY_LICENSE"
-          [ -z "$UNITY_EMAIL" ] && missing="$missing UNITY_EMAIL"
-          [ -z "$UNITY_PASSWORD" ] && missing="$missing UNITY_PASSWORD"
-          if [ -n "$missing" ]; then
-            echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions."
-            exit 1
-          fi
-
-      - name: Free disk space (Unity Android image is large)
+      - name: Free disk space
         uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: false
@@ -47,27 +34,18 @@ jobs:
           haskell: true
           large-packages: false
           swap-storage: false
-
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           lfs: false
-
-      - name: Cache Unity Library
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: Library
           key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
           restore-keys: |
             Library-Android-
-
-      - name: Build with Unity
+      - name: Build APK with Unity
         uses: game-ci/unity-builder@v4
-        env:
-          UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
-          UNITY_EMAIL: ${{ secrets.UNITY_EMAIL }}
-          UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
         with:
           targetPlatform: Android
           unityVersion: auto
@@ -76,11 +54,61 @@ jobs:
           androidExportType: androidPackage
           versioning: None
           customParameters: ${{ inputs.development && '-apogeeDev' || '' }}
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: Apogee-Android-APK
           path: build/Android/*.apk
           if-no-files-found: error
           retention-days: 30
+
+  mac-app:
+    name: macOS app
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@v1.3.1
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          swap-storage: false
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: false
+      - uses: actions/cache@v4
+        with:
+          path: Library
+          key: Library-macOS-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
+          restore-keys: |
+            Library-macOS-
+      - name: Build macOS app with Unity
+        uses: game-ci/unity-builder@v4
+        with:
+          targetPlatform: StandaloneOSX
+          unityVersion: auto
+          buildName: Apogee
+          buildMethod: Apogee.EditorTools.BuildScript.BuildMacCI
+          versioning: None
+          customParameters: ${{ inputs.development && '-apogeeDev' || '' }}
+      - name: Pack app
+        run: |
+          APP=$(sudo find build/StandaloneOSX -maxdepth 2 -name "*.app" -type d | head -n 1)
+          if [ -z "$APP" ]; then echo "::error::No .app produced"; exit 1; fi
+          sudo tar -czf Apogee-mac.tar.gz -C "$(dirname "$APP")" "$(basename "$APP")"
+          sudo chown "$USER" Apogee-mac.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-app-raw
+          path: Apogee-mac.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  mac-dmg:
+    name: macOS DMG
+    needs: mac-app
+    runs-on: macos-latest
+    timeout-minutes: 20
