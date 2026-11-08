@@ -46,7 +46,17 @@ namespace Apogee.Parts
         Girder,
         StructuralPanel,
         HeatShield,
-        RadialChute
+        RadialChute,
+        Aerospike,
+        SphereTank,
+        IBeam,
+        Dish,
+        Rtg,
+        Light,
+        Ladder,
+        EscapeTower,
+        Decal,
+        CrewCabin
     }
 
     /// <summary>Paint / material scheme used to build a part's look.</summary>
@@ -114,6 +124,8 @@ namespace Apogee.Parts
         public bool isFairing;
         public bool isLeg;
         public bool isPayload;             // carries an adjustable payload mass
+        public bool monoprop;              // monopropellant tank: feeds the RCS thrusters
+        public bool isDecal;               // logo panel showing the player's text
         public bool isWheel;               // rolling landing gear (counts as landing support)
         public bool isDockingPort;         // tap in flight to undock everything beyond it
         public float chuteScale = 1f;      // canopy size relative to the standard main chute

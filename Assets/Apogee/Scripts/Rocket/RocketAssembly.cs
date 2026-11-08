@@ -9,6 +9,7 @@ namespace Apogee.Rocket
     {
         public List<PartInstance> parts = new List<PartInstance>(); // parts[0] is the root
         public int symmetry = 1;
+        public bool mirror;      // also place a mirror image (reflected left↔right) of radial / side parts
 
         public PartInstance Root { get { return parts.Count > 0 ? parts[0] : null; } }
 
@@ -196,7 +197,27 @@ namespace Apogee.Rocket
             if (target == null || held.Root == null || !cand.valid) return newRoots;
 
             var targets = bp.SymmetryMembers(target);
-            int perTarget = IsRadialMode(cand.mode) ? Mathf.Max(1, held.symmetry) : 1;
+            // angles (and yaw sign) of the copies placed on each target
+            var angles = new List<float>();
+            var yawSign = new List<float>();
+            if (IsRadialMode(cand.mode))
+            {
+                int sym = Mathf.Max(1, held.symmetry);
+                for (int k = 0; k < sym; k++) { angles.Add(cand.angle + k * 360f / sym); yawSign.Add(1f); }
+                if (held.mirror)
+                {
+                    int n0 = angles.Count;
+                    for (int k = 0; k < n0; k++)
+                    {
+                        float m = Mathf.Repeat(180f - angles[k], 360f);
+                        bool dup = false;
+                        foreach (var a in angles) if (Mathf.Abs(Mathf.DeltaAngle(a, m)) < 1f) dup = true;
+                        if (!dup) { angles.Add(m); yawSign.Add(-1f); }
+                    }
+                }
+            }
+            else { angles.Add(cand.angle); yawSign.Add(1f); }
+            int perTarget = angles.Count;
             int total = 0;
             foreach (var t in targets) if (NodeFree(bp, t, cand.mode)) total += perTarget;
             if (total == 0) return newRoots;
@@ -219,7 +240,8 @@ namespace Apogee.Rocket
                         {
                             p.parentUid = t.uid;
                             p.mode = cand.mode;
-                            p.angle = cand.angle + k * 360f / perTarget;
+                            p.angle = angles[k];
+                            p.yaw *= yawSign[k];
                             p.heightFrac = cand.heightFrac;
                             p.symmetryGroup = total > 1 ? GroupFor(bp, groupMap, "root") : 0;
                             newRoots.Add(p.uid);

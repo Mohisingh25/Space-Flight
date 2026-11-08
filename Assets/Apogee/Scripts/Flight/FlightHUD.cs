@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Apogee.Core;
 using Apogee.UI;
 using UnityEngine;
@@ -7,7 +8,7 @@ using UnityEngine.UI;
 
 namespace Apogee.Flight
 {
-    /// <summary>Button that reports whether it is currently held down (rotation controls).</summary>
+    /// <summary>Button that reports whether it is currently held down.</summary>
     public class HoldButton : MonoBehaviour, IPointerDownHandler, IPointerUpHandler, IPointerExitHandler
     {
         public bool Held { get; private set; }
@@ -22,123 +23,210 @@ namespace Apogee.Flight
         void OnDisable() { Release(); }
     }
 
+    /// <summary>On-screen stick for pitch and yaw. Springs back to centre when released.</summary>
+    public class VirtualStick : MonoBehaviour, IPointerDownHandler, IDragHandler, IPointerUpHandler
+    {
+        public RectTransform knob;
+        public Vector2 Value { get; private set; }
+        RectTransform rt;
+        float radius;
+
+        void Awake() { rt = (RectTransform)transform; }
+        public void OnPointerDown(PointerEventData e) { OnDrag(e); }
+        public void OnDrag(PointerEventData e)
+        {
+            Vector2 local;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(rt, e.position, e.pressEventCamera, out local);
+            radius = rt.rect.width * 0.5f;
+            var v = Vector2.ClampMagnitude(local, radius);
+            knob.anchoredPosition = v;
+            Value = v / radius;
+        }
+        public void OnPointerUp(PointerEventData e) { Value = Vector2.zero; knob.anchoredPosition = Vector2.zero; }
+        void OnDisable() { Value = Vector2.zero; if (knob != null) knob.anchoredPosition = Vector2.zero; }
+    }
+
     /// <summary>
-    /// Flight controls and telemetry, laid out like Spaceflight Simulator: menu and map top-left, time warp
-    /// and telemetry top-right, engine on/off and throttle on the right, rotation at the bottom centre,
-    /// staging and fuel at the bottom left.
+    /// Flight controls: menu/map/camera/inside top-left; warp and telemetry top-right; SAS modes down the
+    /// left; joystick and roll bottom-left; throttle, engines and STAGE bottom-right; RCS pad (6 directions)
+    /// at the bottom centre; rollout/countdown panel; cockpit window frame.
     /// </summary>
     public class FlightHUD : MonoBehaviour
     {
-        public HoldButton left, right, rcsUp, rcsDown, rcsLeft, rcsRight;
-        public Button insideButton, rcsButton;
-        public RectTransform rcsPad;
-        public Text cheatBadge;
-        public Action OnInside, OnRcs;
+        public RectTransform root, controls, rcsPad, rolloutPanel, cockpitFrame, mapLabels;
+        public VirtualStick stick;
+        public HoldButton rollLeft, rollRight, rcsUp, rcsDown, rcsLeft, rcsRight, rcsFwd, rcsBack, drive;
         public Slider throttle;
-        public Button engineButton, stageButton, mapButton, warpUp, warpDown, menuButton;
-        public Text telemetry, throttleLabel, warpLabel, message, stageLabel, hint;
-        public Image liquidFill, solidFill;
+        public Button engineButton, stageButton, mapButton, camButton, insideButton, rcsButton, menuButton, warpUp, warpDown, targetButton;
+        public Button countdownButton, skipButton;
+        public Text telemetry, navInfo, warpLabel, message, hint, stageLabel, rolloutText, countdownText, cheatBadge, cockpitInstruments;
+        public Image liquidFill, solidFill, rcsFill;
         public GameObject solidRow;
-        public RectTransform apLabel, peLabel, root;
-        public RectTransform controlsGroup;
+        public readonly Dictionary<SasMode, Button> sasButtons = new Dictionary<SasMode, Button>();
         CanvasGroup messageGroup;
         float messageTime;
 
-        public Action OnStage, OnToggleEngine, OnMap, OnWarpUp, OnWarpDown, OnMenu;
+        public Action OnStage, OnToggleEngine, OnMap, OnCamera, OnInside, OnRcs, OnMenu, OnWarpUp, OnWarpDown, OnCountdown, OnSkipRollout, OnTarget;
         public Action<float> OnThrottle;
+        public Action<SasMode> OnSas;
 
         public void Init()
         {
             Canvas canvas;
             root = UIFactory.CreateCanvas("Flight HUD", 10, out canvas);
 
-            // ---- top-left: menu + map
-            menuButton = UIFactory.Button(root, "Menu", () => { if (OnMenu != null) OnMenu(); });
-            UIFactory.Place((RectTransform)menuButton.transform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(20, -18), new Vector2(150, 84));
-            mapButton = UIFactory.Button(root, "Map", () => { if (OnMap != null) OnMap(); });
-            UIFactory.Place((RectTransform)mapButton.transform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(182, -18), new Vector2(150, 84));
+            // cockpit window frame (behind the controls)
+            cockpitFrame = UIFactory.Rect("Cockpit", root);
+            UIFactory.Stretch(cockpitFrame);
+            var frameCol = new Color(0.07f, 0.08f, 0.09f, 0.97f);
+            Bar(cockpitFrame, new Vector2(0, 0), new Vector2(1, 0.2f), frameCol);
+            Bar(cockpitFrame, new Vector2(0, 0.86f), new Vector2(1, 1), frameCol);
+            Bar(cockpitFrame, new Vector2(0, 0), new Vector2(0.08f, 1), frameCol);
+            Bar(cockpitFrame, new Vector2(0.92f, 0), new Vector2(1, 1), frameCol);
+            Bar(cockpitFrame, new Vector2(0.495f, 0.2f), new Vector2(0.505f, 0.86f), frameCol);   // window mullion
+            cockpitInstruments = UIFactory.Label(cockpitFrame, "", 22, new Color(0.45f, 1f, 0.6f), TextAnchor.MiddleCenter, FontStyle.Bold);
+            cockpitInstruments.rectTransform.anchorMin = new Vector2(0.2f, 0.02f);
+            cockpitInstruments.rectTransform.anchorMax = new Vector2(0.8f, 0.18f);
+            cockpitInstruments.rectTransform.offsetMin = cockpitInstruments.rectTransform.offsetMax = Vector2.zero;
+            cockpitFrame.gameObject.SetActive(false);
 
-            // ---- under them: inside view + RCS
-            insideButton = UIFactory.Button(root, "Inside", () => { if (OnInside != null) OnInside(); }, ButtonStyle.Normal, 24);
-            UIFactory.Place((RectTransform)insideButton.transform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(20, -114), new Vector2(150, 70));
-            rcsButton = UIFactory.Button(root, "RCS", () => { if (OnRcs != null) OnRcs(); }, ButtonStyle.Normal, 24);
-            UIFactory.Place((RectTransform)rcsButton.transform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(182, -114), new Vector2(150, 70));
+            mapLabels = UIFactory.Rect("Map Labels", root);
+            UIFactory.Stretch(mapLabels);
+
+            // ---- top-left
+            menuButton = Btn("Menu", () => Call(OnMenu), new Vector2(0, 1), new Vector2(20, -18), new Vector2(140, 76));
+            mapButton = Btn("Map", () => Call(OnMap), new Vector2(0, 1), new Vector2(170, -18), new Vector2(140, 76));
+            camButton = Btn("Chase", () => Call(OnCamera), new Vector2(0, 1), new Vector2(20, -104), new Vector2(140, 66), 22);
+            insideButton = Btn("Inside", () => Call(OnInside), new Vector2(0, 1), new Vector2(170, -104), new Vector2(140, 66), 22);
+            targetButton = Btn("Target", () => Call(OnTarget), new Vector2(0, 1), new Vector2(320, -18), new Vector2(150, 76));
+            targetButton.gameObject.SetActive(false);
             cheatBadge = UIFactory.Label(root, "CHEATS ON", 20, Theme.Bad, TextAnchor.MiddleLeft, FontStyle.Bold);
-            UIFactory.Place(cheatBadge.rectTransform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(24, -192), new Vector2(400, 34));
+            UIFactory.Place(cheatBadge.rectTransform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(24, -178), new Vector2(300, 30));
             cheatBadge.gameObject.SetActive(false);
 
             // ---- top-right: warp + telemetry
-            warpDown = UIFactory.Button(root, "<<", () => { if (OnWarpDown != null) OnWarpDown(); }, ButtonStyle.Normal, 34);
-            UIFactory.Place((RectTransform)warpDown.transform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-196, -18), new Vector2(130, 84));
-            warpUp = UIFactory.Button(root, ">>", () => { if (OnWarpUp != null) OnWarpUp(); }, ButtonStyle.Normal, 34);
-            UIFactory.Place((RectTransform)warpUp.transform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-20, -18), new Vector2(160, 84));
-            warpLabel = UIFactory.Label(root, "1×", 26, Theme.Text, TextAnchor.MiddleRight, FontStyle.Bold);
-            UIFactory.Place(warpLabel.rectTransform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-340, -18), new Vector2(140, 84));
-            telemetry = UIFactory.Label(root, "", 30, Theme.Text, TextAnchor.UpperRight, FontStyle.Bold);
-            UIFactory.Place(telemetry.rectTransform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-24, -116), new Vector2(560, 420));
-            var shadow = telemetry.gameObject.AddComponent<Shadow>();
-            shadow.effectColor = new Color(0, 0, 0, 0.6f);
-            shadow.effectDistance = new Vector2(2, -2);
+            warpDown = Btn("<<", () => Call(OnWarpDown), new Vector2(1, 1), new Vector2(-190, -18), new Vector2(110, 76), 30);
+            warpUp = Btn(">>", () => Call(OnWarpUp), new Vector2(1, 1), new Vector2(-20, -18), new Vector2(110, 76), 30);
+            warpLabel = UIFactory.Label(root, "1×", 26, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
+            UIFactory.Place(warpLabel.rectTransform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-132, -18), new Vector2(60, 76));
+            var tp = UIFactory.Panel(root, new Color(0f, 0f, 0f, 0.38f), true, "Telemetry");
+            UIFactory.Place(tp.rectTransform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-20, -104), new Vector2(380, 380));
+            telemetry = UIFactory.Label(tp.transform, "", 21, Theme.Text, TextAnchor.UpperLeft);
+            UIFactory.Stretch(telemetry.rectTransform, 14, 10, 10, 10);
+            telemetry.supportRichText = true;
+            navInfo = UIFactory.Label(root, "", 20, Theme.Accent, TextAnchor.UpperRight);
+            UIFactory.Place(navInfo.rectTransform, new Vector2(1, 1), new Vector2(1, 1), new Vector2(-20, -490), new Vector2(560, 120));
+            navInfo.supportRichText = true;
 
-            // ---- centre message
-            message = UIFactory.Label(root, "", 40, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
-            HorizontalBand(message.rectTransform, 0.72f, 80f);
-            message.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.6f);
+            // ---- centre messages
+            message = UIFactory.Label(root, "", 32, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
+            Band(message.rectTransform, 0.74f, 90f);
+            message.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.8f);
             messageGroup = message.gameObject.AddComponent<CanvasGroup>();
             messageGroup.alpha = 0f;
-            hint = UIFactory.Label(root, "", 26, Theme.Text, TextAnchor.MiddleCenter);
-            HorizontalBand(hint.rectTransform, 0.62f, 60f);
-            hint.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.6f);
+            messageGroup.blocksRaycasts = false;
+            hint = UIFactory.Label(root, "", 24, Theme.Accent, TextAnchor.MiddleCenter);
+            Band(hint.rectTransform, 0.66f, 60f);
+            hint.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.8f);
 
-            controlsGroup = UIFactory.Rect("Controls", root);
-            UIFactory.Stretch(controlsGroup);
+            controls = UIFactory.Rect("Controls", root);
+            UIFactory.Stretch(controls);
 
-            // ---- right edge: engine toggle, throttle %, vertical throttle slider
-            engineButton = UIFactory.Button(controlsGroup, "Off", () => { if (OnToggleEngine != null) OnToggleEngine(); }, ButtonStyle.Normal, 30);
-            UIFactory.Place((RectTransform)engineButton.transform, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-24, 640), new Vector2(130, 80));
-            throttleLabel = UIFactory.Label(controlsGroup, "100%", 28, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
-            var tlBg = UIFactory.Panel(controlsGroup, Theme.ButtonBg, true, "ThrottleLabelBg");
-            tlBg.sprite = UIFactory.RoundedSmall;
-            UIFactory.Place(tlBg.rectTransform, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-24, 548), new Vector2(130, 74));
-            throttleLabel.transform.SetParent(tlBg.transform, false);
-            UIFactory.Stretch(throttleLabel.rectTransform);
-            throttle = VerticalSlider(controlsGroup);
+            // ---- SAS column, left middle
+            var sas = UIFactory.Rect("SAS", controls);
+            sas.anchorMin = sas.anchorMax = new Vector2(0f, 0.5f);
+            sas.pivot = new Vector2(0f, 0.5f);
+            sas.anchoredPosition = new Vector2(16f, 110f);
+            sas.sizeDelta = new Vector2(120f, 520f);
+            var v = UIFactory.Vertical(sas, 6, 0, true);
+            v.childForceExpandHeight = true;
+            var modes = new[] { SasMode.Stability, SasMode.Prograde, SasMode.Retrograde, SasMode.RadialOut, SasMode.RadialIn, SasMode.Normal, SasMode.AntiNormal, SasMode.Target };
+            var names = new[] { "SAS", "Pro", "Retro", "Rad+", "Rad−", "Nrm", "Anti", "Tgt" };
+            for (int i = 0; i < modes.Length; i++)
+            {
+                var m = modes[i];
+                var b = UIFactory.Button(sas, names[i], () => { if (OnSas != null) OnSas(m); }, ButtonStyle.Normal, 21);
+                sasButtons[m] = b;
+            }
 
-            // ---- bottom centre: rotation
-            left = Hold(controlsGroup, "◀", new Vector2(-110, 30));
-            right = Hold(controlsGroup, "▶", new Vector2(110, 30));
+            // ---- joystick + roll (bottom-left)
+            var stickRt = UIFactory.Panel(controls, new Color(0.1f, 0.15f, 0.2f, 0.55f), true, "Stick");
+            stickRt.sprite = UIFactory.RoundedSmall;
+            UIFactory.Place(stickRt.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(40, 40), new Vector2(280, 280));
+            var knob = UIFactory.Panel(stickRt.transform, new Color(0.85f, 0.92f, 1f, 0.85f), true, "Knob");
+            knob.sprite = UIFactory.RoundedSmall;
+            UIFactory.Place(knob.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0.5f, 0.5f), Vector2.zero, new Vector2(96, 96));
+            knob.raycastTarget = false;
+            stick = stickRt.gameObject.AddComponent<VirtualStick>();
+            stick.knob = knob.rectTransform;
+            var lbl = UIFactory.Label(stickRt.transform, "PITCH / YAW", 16, Theme.Muted, TextAnchor.UpperCenter);
+            UIFactory.Stretch(lbl.rectTransform, 0, 0, 0, 6);
+            lbl.raycastTarget = false;
+            rollLeft = Hold(controls, "⟲", new Vector2(0, 0), new Vector2(334, 186), new Vector2(110, 84), 40);
+            rollRight = Hold(controls, "⟳", new Vector2(0, 0), new Vector2(334, 90), new Vector2(110, 84), 40);
 
-            // RCS translation pad (shown while RCS is on): pushes the craft without turning it.
-            rcsPad = UIFactory.Rect("RcsPad", controlsGroup);
+            // ---- throttle, engines, stage, fuel (bottom-right)
+            throttle = VerticalSlider(controls);
+            engineButton = Btn("Engines\nON", () => Call(OnToggleEngine), new Vector2(1, 0), new Vector2(-150, 360), new Vector2(150, 96), 22, controls);
+            stageButton = Btn("STAGE", () => Call(OnStage), new Vector2(1, 0), new Vector2(-150, 40), new Vector2(240, 120), 34, controls);
+            UIFactory.SetButtonColor(stageButton, Theme.ButtonPrimary);
+            stageLabel = UIFactory.Label(controls, "", 20, Theme.Muted, TextAnchor.LowerRight);
+            UIFactory.Place(stageLabel.rectTransform, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-150, 168), new Vector2(420, 34));
+            liquidFill = FuelBar(controls, "Liquid", 210, new Color(1f, 0.62f, 0.2f));
+            var solid = FuelBar(controls, "Solid", 245, new Color(0.95f, 0.85f, 0.5f));
+            solidFill = solid;
+            solidRow = solid.transform.parent.gameObject;
+            rcsFill = FuelBar(controls, "Mono", 280, new Color(0.7f, 0.85f, 1f));
+
+            // ---- RCS (bottom centre)
+            rcsButton = Btn("RCS", () => Call(OnRcs), new Vector2(0, 0), new Vector2(334, 282), new Vector2(110, 70), 22, controls);
+            rcsPad = UIFactory.Rect("RcsPad", controls);
             rcsPad.anchorMin = rcsPad.anchorMax = new Vector2(0.5f, 0f);
             rcsPad.pivot = new Vector2(0.5f, 0f);
-            rcsPad.sizeDelta = new Vector2(300, 220);
-            rcsPad.anchoredPosition = new Vector2(0, 175);
-            rcsUp = SmallHold(rcsPad, "▲", new Vector2(0, 150));
-            rcsDown = SmallHold(rcsPad, "▼", new Vector2(0, 0));
-            rcsLeft = SmallHold(rcsPad, "◀", new Vector2(-100, 75));
-            rcsRight = SmallHold(rcsPad, "▶", new Vector2(100, 75));
+            rcsPad.sizeDelta = new Vector2(360, 230);
+            rcsPad.anchoredPosition = new Vector2(30, 30);
+            rcsUp = Hold(rcsPad, "▲", new Vector2(0.5f, 0), new Vector2(0, 160), new Vector2(90, 64), 28);
+            rcsDown = Hold(rcsPad, "▼", new Vector2(0.5f, 0), new Vector2(0, 0), new Vector2(90, 64), 28);
+            rcsLeft = Hold(rcsPad, "◀", new Vector2(0.5f, 0), new Vector2(-105, 80), new Vector2(90, 64), 28);
+            rcsRight = Hold(rcsPad, "▶", new Vector2(0.5f, 0), new Vector2(105, 80), new Vector2(90, 64), 28);
+            rcsFwd = Hold(rcsPad, "FWD", new Vector2(0.5f, 0), new Vector2(-120, 160), new Vector2(84, 54), 18);
+            rcsBack = Hold(rcsPad, "BACK", new Vector2(0.5f, 0), new Vector2(120, 160), new Vector2(84, 54), 18);
             var rl = UIFactory.Label(rcsPad, "RCS", 18, Theme.Accent, TextAnchor.MiddleCenter, FontStyle.Bold);
-            UIFactory.Place(rl.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0, 95), new Vector2(90, 30));
+            UIFactory.Place(rl.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0, 92), new Vector2(90, 30));
             rcsPad.gameObject.SetActive(false);
 
-            // ---- bottom left: staging and fuel
-            stageButton = UIFactory.Button(controlsGroup, "STAGE", () => { if (OnStage != null) OnStage(); }, ButtonStyle.Primary, 34);
-            UIFactory.Place((RectTransform)stageButton.transform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(24, 150), new Vector2(260, 110));
-            stageLabel = UIFactory.Label(controlsGroup, "", 22, Theme.Text, TextAnchor.LowerLeft);
-            UIFactory.Place(stageLabel.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(26, 266), new Vector2(520, 40));
-            stageLabel.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.6f);
-            liquidFill = FuelBar(controlsGroup, "Liquid fuel", new Vector2(24, 86), new Color(0.92f, 0.94f, 0.97f));
-            solidFill = FuelBar(controlsGroup, "Solid fuel", new Vector2(24, 26), new Color(1f, 0.72f, 0.35f));
-            solidRow = solidFill.transform.parent.parent.gameObject;
-
-            // ---- map labels
-            apLabel = MapLabel("Ap");
-            peLabel = MapLabel("Pe");
+            // ---- rollout / countdown panel (bottom centre, before launch)
+            rolloutPanel = UIFactory.Rect("Rollout", root);
+            rolloutPanel.anchorMin = rolloutPanel.anchorMax = new Vector2(0.5f, 0f);
+            rolloutPanel.pivot = new Vector2(0.5f, 0f);
+            rolloutPanel.sizeDelta = new Vector2(620, 330);
+            rolloutPanel.anchoredPosition = new Vector2(0, 30);
+            var rp = UIFactory.Panel(rolloutPanel, new Color(0f, 0f, 0f, 0.55f), true, "Bg");
+            UIFactory.Stretch(rp.rectTransform);
+            rolloutText = UIFactory.Label(rolloutPanel, "", 22, Theme.Text, TextAnchor.UpperCenter);
+            UIFactory.Stretch(rolloutText.rectTransform, 16, 160, 16, 12);
+            drive = Hold(rolloutPanel, "HOLD TO DRIVE ▶", new Vector2(0.5f, 0), new Vector2(-110, 20), new Vector2(360, 120), 28);
+            skipButton = Btn("Skip ⏩", () => Call(OnSkipRollout), new Vector2(0.5f, 0), new Vector2(200, 20), new Vector2(170, 120), 26, rolloutPanel, true);
+            countdownButton = Btn("START COUNTDOWN", () => Call(OnCountdown), new Vector2(0.5f, 0), new Vector2(0, 20), new Vector2(520, 120), 30, rolloutPanel, true);
+            UIFactory.SetButtonColor(countdownButton, Theme.ButtonPrimary);
+            countdownText = UIFactory.Label(root, "", 120, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
+            Band(countdownText.rectTransform, 0.5f, 180f);
+            countdownText.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.8f);
+            countdownText.raycastTarget = false;
         }
 
-        /// <summary>Full-width text band (with side margins) so messages fit in portrait as well as landscape.</summary>
-        static void HorizontalBand(RectTransform rt, float y, float height)
+        static void Call(Action a) { if (a != null) a(); }
+
+        void Bar(RectTransform parent, Vector2 min, Vector2 max, Color c)
+        {
+            var img = UIFactory.Panel(parent, c, false, "Frame");
+            img.rectTransform.anchorMin = min;
+            img.rectTransform.anchorMax = max;
+            img.rectTransform.offsetMin = img.rectTransform.offsetMax = Vector2.zero;
+            img.raycastTarget = false;
+        }
+
+        static void Band(RectTransform rt, float y, float height)
         {
             rt.anchorMin = new Vector2(0f, y);
             rt.anchorMax = new Vector2(1f, y);
@@ -147,72 +235,61 @@ namespace Apogee.Flight
             rt.offsetMax = new Vector2(-40f, height * 0.5f);
         }
 
-        RectTransform MapLabel(string title)
+        Button Btn(string label, Action a, Vector2 anchor, Vector2 pos, Vector2 size, int font = 26, RectTransform parent = null, bool centrePivot = false)
         {
-            var t = UIFactory.Label(root, title, 22, Theme.Text, TextAnchor.LowerCenter, FontStyle.Bold);
-            t.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.7f);
-            var rt = t.rectTransform;
-            rt.anchorMin = rt.anchorMax = Vector2.zero;
-            rt.pivot = new Vector2(0.5f, 0f);
-            rt.sizeDelta = new Vector2(300, 70);
-            t.gameObject.SetActive(false);
-            return rt;
+            var b = UIFactory.Button(parent ?? root, label, a, ButtonStyle.Normal, font);
+            var pivot = centrePivot ? new Vector2(0.5f, 0f) : anchor;
+            UIFactory.Place((RectTransform)b.transform, anchor, pivot, pos, size);
+            return b;
         }
 
-        HoldButton Hold(RectTransform parent, string label, Vector2 pos)
+        HoldButton Hold(RectTransform parent, string label, Vector2 anchor, Vector2 pos, Vector2 size, int font)
         {
-            var img = UIFactory.Panel(parent, Theme.ButtonBg, true, "Rotate" + label);
+            var img = UIFactory.Panel(parent, Theme.ButtonBg, true, "Hold " + label);
             img.sprite = UIFactory.RoundedSmall;
-            UIFactory.Place(img.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0), pos, new Vector2(190, 130));
-            var t = UIFactory.Label(img.transform, label, 56, Theme.Text, TextAnchor.MiddleCenter);
+            UIFactory.Place(img.rectTransform, anchor, anchor.x == 0.5f ? new Vector2(0.5f, 0f) : anchor, pos, size);
+            var t = UIFactory.Label(img.transform, label, font, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
             UIFactory.Stretch(t.rectTransform);
+            t.raycastTarget = false;
             return img.gameObject.AddComponent<HoldButton>();
         }
 
-        HoldButton SmallHold(RectTransform parent, string label, Vector2 pos)
+        Image FuelBar(RectTransform parent, string name, float y, Color c)
         {
-            var img = UIFactory.Panel(parent, new Color(0.1f, 0.16f, 0.22f, 0.85f), true, "Rcs" + label);
-            img.sprite = UIFactory.RoundedSmall;
-            UIFactory.Place(img.rectTransform, new Vector2(0.5f, 0), new Vector2(0.5f, 0), pos, new Vector2(92, 66));
-            var t = UIFactory.Label(img.transform, label, 30, Theme.Accent, TextAnchor.MiddleCenter);
-            UIFactory.Stretch(t.rectTransform);
-            return img.gameObject.AddComponent<HoldButton>();
-        }
-
-        Image FuelBar(RectTransform parent, string title, Vector2 pos, Color color)
-        {
-            var row = UIFactory.Rect(title, parent);
-            UIFactory.Place(row, new Vector2(0, 0), new Vector2(0, 0), pos, new Vector2(300, 56));
-            var t = UIFactory.Label(row, title + ":", 22, Theme.Text, TextAnchor.UpperLeft, FontStyle.Bold);
-            UIFactory.Stretch(t.rectTransform);
-            t.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.6f);
-            var bg = UIFactory.Panel(row, new Color(0, 0, 0, 0.35f), true, "Track");
+            var row = UIFactory.Rect(name + "Row", parent);
+            UIFactory.Place(row, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-150, y), new Vector2(240, 26));
+            var l = UIFactory.Label(row, name, 16, Theme.Muted, TextAnchor.MiddleLeft);
+            UIFactory.Place(l.rectTransform, new Vector2(0, 0.5f), new Vector2(0, 0.5f), Vector2.zero, new Vector2(60, 26));
+            var bg = UIFactory.Panel(row, new Color(1f, 1f, 1f, 0.1f), true, "Bg");
             bg.sprite = UIFactory.RoundedSmall;
             bg.rectTransform.anchorMin = new Vector2(0, 0);
-            bg.rectTransform.anchorMax = new Vector2(1, 0);
-            bg.rectTransform.pivot = new Vector2(0, 0);
-            bg.rectTransform.sizeDelta = new Vector2(0, 20);
-            bg.rectTransform.anchoredPosition = Vector2.zero;
-            var fill = UIFactory.Panel(bg.transform, color, true, "Fill");
+            bg.rectTransform.anchorMax = new Vector2(1, 1);
+            bg.rectTransform.offsetMin = new Vector2(64, 4);
+            bg.rectTransform.offsetMax = new Vector2(0, -4);
+            var fill = UIFactory.Panel(bg.transform, c, true, "Fill");
             fill.sprite = UIFactory.RoundedSmall;
             fill.rectTransform.anchorMin = Vector2.zero;
             fill.rectTransform.anchorMax = new Vector2(1, 1);
-            fill.rectTransform.offsetMin = Vector2.zero;
-            fill.rectTransform.offsetMax = Vector2.zero;
+            fill.rectTransform.offsetMin = fill.rectTransform.offsetMax = Vector2.zero;
             return fill;
+        }
+
+        public static void SetFill(Image fill, float f)
+        {
+            fill.rectTransform.anchorMax = new Vector2(Mathf.Clamp01(f), 1f);
         }
 
         Slider VerticalSlider(RectTransform parent)
         {
             var sRoot = UIFactory.Rect("Throttle", parent);
-            UIFactory.Place(sRoot, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-54, 40), new Vector2(76, 490));
+            UIFactory.Place(sRoot, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-30, 40), new Vector2(96, 420));
             var slider = sRoot.gameObject.AddComponent<Slider>();
             var bg = UIFactory.Panel(sRoot, new Color(0.12f, 0.17f, 0.23f, 0.85f), true, "Background");
             bg.sprite = UIFactory.RoundedSmall;
             UIFactory.Stretch(bg.rectTransform);
             var fillArea = UIFactory.Rect("Fill Area", sRoot);
             UIFactory.Stretch(fillArea, 8, 8, 8, 8);
-            var fill = UIFactory.Panel(fillArea, new Color(0.9f, 0.93f, 0.97f, 0.95f), true, "Fill");
+            var fill = UIFactory.Panel(fillArea, new Color(1f, 0.62f, 0.2f, 0.95f), true, "Fill");
             fill.sprite = UIFactory.RoundedSmall;
             fill.rectTransform.sizeDelta = Vector2.zero;
             var handleArea = UIFactory.Rect("Handle Slide Area", sRoot);
@@ -227,11 +304,14 @@ namespace Apogee.Flight
             slider.maxValue = 1f;
             var nav = slider.navigation; nav.mode = Navigation.Mode.None; slider.navigation = nav;
             slider.value = 1f;
-            slider.onValueChanged.AddListener(v => { if (OnThrottle != null) OnThrottle(v); });
+            slider.onValueChanged.AddListener(x => { if (OnThrottle != null) OnThrottle(x); });
+            var t = UIFactory.Label(sRoot, "THR", 16, Theme.Text, TextAnchor.UpperCenter, FontStyle.Bold);
+            UIFactory.Stretch(t.rectTransform, 0, 0, 0, 6);
+            t.raycastTarget = false;
             return slider;
         }
 
-        public void Message(string text, float seconds = 2.2f)
+        public void Message(string text, float seconds = 2.4f)
         {
             message.text = text;
             messageTime = seconds;
@@ -240,6 +320,8 @@ namespace Apogee.Flight
 
         void Update()
         {
+            // keep the RCS pad clear of the stage button on narrow (portrait) screens
+            if (rcsPad != null) rcsPad.anchoredPosition = UIFactory.Portrait ? new Vector2(0f, 440f) : new Vector2(30f, 30f);
             if (messageTime > 0f)
             {
                 messageTime -= Time.unscaledDeltaTime;
@@ -247,19 +329,34 @@ namespace Apogee.Flight
             }
         }
 
-        public static string FormatDistance(double m)
+        public Text MakeMapLabel(string text, Color c)
         {
-            if (double.IsInfinity(m) || double.IsNaN(m)) return "Escape";
-            if (Math.Abs(m) < 10000) return m.ToString("0.0") + "m";
-            if (Math.Abs(m) < 1e7) return (m / 1000.0).ToString("N1") + "km";
-            return (m / 1000.0).ToString("N0") + "km";
+            var t = UIFactory.Label(mapLabels, text, 20, c, TextAnchor.LowerCenter, FontStyle.Bold);
+            t.gameObject.AddComponent<Shadow>().effectColor = new Color(0, 0, 0, 0.8f);
+            t.rectTransform.anchorMin = t.rectTransform.anchorMax = Vector2.zero;
+            t.rectTransform.pivot = new Vector2(0.5f, 0f);
+            t.rectTransform.sizeDelta = new Vector2(260, 60);
+            return t;
+        }
+
+        public static string Dist(double m)
+        {
+            if (double.IsInfinity(m) || double.IsNaN(m)) return "escape";
+            double a = Math.Abs(m);
+            if (a < 10000) return m.ToString("N0") + " m";
+            if (a < 1e7) return (m / 1000.0).ToString("N1") + " km";
+            if (a < 1e10) return (m / 1000.0).ToString("N0") + " km";
+            return (m / 1.495978707e11).ToString("0.00") + " AU";
         }
 
         public static string FormatTime(double s)
         {
-            int t = (int)s;
+            if (double.IsInfinity(s) || double.IsNaN(s) || s < 0) return "—";
+            long t = (long)s;
+            if (t >= 86400) return (t / 86400) + "d " + ((t / 3600) % 24) + "h";
             if (t >= 3600) return (t / 3600) + "h " + ((t / 60) % 60).ToString("00") + "m";
-            return (t / 60).ToString("00") + ":" + (t % 60).ToString("00");
+            if (t >= 60) return (t / 60) + "m " + (t % 60).ToString("00") + "s";
+            return t + "s";
         }
     }
 }

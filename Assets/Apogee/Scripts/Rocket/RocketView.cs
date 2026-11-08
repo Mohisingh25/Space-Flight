@@ -134,6 +134,7 @@ namespace Apogee.Rocket
                 view.paint = p.paint;
                 view.baseColors = PartPaint.Apply(r, model.materialKeys, p.paint, mpb);
                 if (xray) XRay.Apply(go, p, true);
+                DecalText.Attach(go, p);
             }
             return view;
         }

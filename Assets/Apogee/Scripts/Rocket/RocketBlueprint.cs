@@ -29,6 +29,7 @@ namespace Apogee.Rocket
         public int sizeStep = -1;   // index into PartCatalog.DiameterSteps, -1 = default size
         public int lengthStep = -1; // index into PartCatalog.LengthSteps, -1 = 1x
         public int symmetryGroup;   // parts placed together in symmetry share a non-zero id
+        public string label = "";   // logo text for logo panels
         public float payloadMass;   // t, for payload containers / cargo modules
         public int stage = -1;      // activation stage (0 = launch) for staged parts
         public int paint = -1;      // index into PaintPalette, -1 = the part's factory finish

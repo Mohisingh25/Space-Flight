@@ -111,6 +111,16 @@ namespace Apogee.Rendering
                 case PartShape.Girder: Girder(r, h, mb, m); break;
                 case PartShape.StructuralPanel: Panel(d.diameter, h, mb, m); break;
                 case PartShape.HeatShield: HeatShield(r, h, mb, m); break;
+                case PartShape.Aerospike: Aerospike(r, h, mb, m); break;
+                case PartShape.SphereTank: SphereTank(r, d, mb, m); break;
+                case PartShape.IBeam: IBeam(r, h, mb, m); break;
+                case PartShape.Dish: Dish(d.diameter, h, mb, m); break;
+                case PartShape.Rtg: Rtg(r, h, mb, m); break;
+                case PartShape.Light: Lamp(r, mb, m); break;
+                case PartShape.Ladder: Ladder(h, mb, m); break;
+                case PartShape.EscapeTower: EscapeTower(r, h, mb, m); break;
+                case PartShape.Decal: DecalPanel(d.diameter, h, mb, m); break;
+                case PartShape.CrewCabin: CrewCabin(r, h, mb, m); break;
                 case PartShape.RadialChute:
                 {
                     var saved = mb.transform;
@@ -308,6 +318,145 @@ namespace Apogee.Rendering
                 mb.Tube(p1 + Vector3.up * (-h / 2 + plate), p0 + Vector3.up * (h / 2 - plate), br * 0.6f, 8, m["aluminium"]);
             }
             mb.Cylinder(r * 0.25f, -h / 2 + plate, h / 2 - plate, 16, m["copper"], false); // central feed line
+        }
+
+        static void Aerospike(float r, float h, MeshBuilder mb, Mats m)
+        {
+            int seg = Segs(r);
+            float y0 = -h / 2, y1 = h / 2;
+            mb.Lathe(P(0f, y1, r, y1, r, y1 - h * 0.25f, r * 0.92f, y1 - h * 0.3f), seg, m["dark_metal"]);
+            // truncated plug: the exhaust expands against the spike instead of a bell
+            mb.Lathe(P(r * 0.9f, y1 - h * 0.3f, r * 0.62f, y0 + h * 0.25f, r * 0.3f, y0 + h * 0.02f, 0f, y0), seg, m["nozzle"]);
+            mb.Lathe(P(r * 0.94f, y1 - h * 0.28f, r * 0.96f, y1 - h * 0.45f), seg, m["copper"]);
+        }
+
+        static void SphereTank(float r, PartDims d, MeshBuilder mb, Mats m)
+        {
+            var saved = mb.transform;
+            mb.transform = saved * Matrix4x4.Scale(new Vector3(r, d.height * 0.5f, r));
+            var prof = new List<Vector2>();
+            for (int i = 0; i <= 16; i++)
+            {
+                float a = -Mathf.PI / 2 + Mathf.PI * i / 16f;
+                prof.Add(new Vector2(Mathf.Cos(a), Mathf.Sin(a)));
+            }
+            prof[0] = new Vector2(0f, -1f); prof[16] = new Vector2(0f, 1f);
+            mb.Lathe(prof, 28, m[d.diameter < 1f ? "white" : "silver_foil"]);
+            mb.transform = saved;
+            mb.Lathe(P(r * 1.02f, -0.06f, r * 1.02f, 0.06f), 28, m["dark_metal"]);                 // equator ring
+            for (int k = 0; k < 4; k++)
+            {
+                float a = k * Mathf.PI * 0.5f + Mathf.PI * 0.25f;
+                mb.Tube(new Vector3(Mathf.Cos(a) * r, 0f, Mathf.Sin(a) * r), new Vector3(Mathf.Cos(a) * r * 0.6f, -d.height * 0.5f, Mathf.Sin(a) * r * 0.6f), 0.03f, 6, m["aluminium"]);
+            }
+        }
+
+        static void IBeam(float r, float h, MeshBuilder mb, Mats m)
+        {
+            float w = r * 1.6f, t = Mathf.Max(0.04f, r * 0.12f);
+            mb.Box(new Vector3(0f, 0f, w * 0.5f - t * 0.5f), new Vector3(w, h, t), m["dark_metal"]);
+            mb.Box(new Vector3(0f, 0f, -w * 0.5f + t * 0.5f), new Vector3(w, h, t), m["dark_metal"]);
+            mb.Box(Vector3.zero, new Vector3(t, h, w), m["dark_metal"]);
+            for (float y = -h / 2 + 0.3f; y < h / 2; y += 0.6f)
+                mb.Box(new Vector3(t * 0.6f, y, w * 0.25f), new Vector3(0.03f, 0.05f, 0.05f), m["aluminium"]);
+        }
+
+        static void Dish(float dd, float h, MeshBuilder mb, Mats m)
+        {
+            float R = dd * 0.5f;
+            mb.Box(new Vector3(0.05f, 0f, 0f), new Vector3(0.1f, 0.2f, 0.2f), m["dark_metal"]);
+            mb.Tube(new Vector3(0.1f, 0f, 0f), new Vector3(h * 0.55f, 0f, 0f), 0.035f, 8, m["aluminium"]);
+            var saved = mb.transform;
+            mb.transform = saved * Matrix4x4.TRS(new Vector3(h * 0.55f, 0f, 0f), Quaternion.Euler(0f, 0f, -90f), Vector3.one);
+            var prof = new List<Vector2>();
+            for (int i = 0; i <= 10; i++) { float x = R * i / 10f; prof.Add(new Vector2(x, x * x / (4f * R * 0.45f))); }
+            mb.Lathe(prof, 32, m["white"]);
+            var back = new List<Vector2>();
+            for (int i = 10; i >= 0; i--) { float x = R * i / 10f; back.Add(new Vector2(x, x * x / (4f * R * 0.45f) - 0.02f)); }
+            mb.Lathe(back, 32, m["aluminium"]);
+            float focus = R * 0.45f;
+            for (int k = 0; k < 3; k++)
+            {
+                float a = k * Mathf.PI * 2f / 3f;
+                mb.Tube(new Vector3(Mathf.Cos(a) * R * 0.95f, R * 0.5f, Mathf.Sin(a) * R * 0.95f), new Vector3(0f, focus, 0f), 0.012f, 4, m["aluminium"]);
+            }
+            mb.Lathe(P(0f, focus - 0.05f, R * 0.06f, focus - 0.05f, R * 0.06f, focus + 0.05f, 0f, focus + 0.05f), 12, m["gold"]);
+            mb.transform = saved;
+        }
+
+        static void Rtg(float r, float h, MeshBuilder mb, Mats m)
+        {
+            mb.Tube(new Vector3(0.02f, 0f, 0f), new Vector3(0.25f + r * 0.3f, 0f, 0f), 0.04f, 8, m["aluminium"]);
+            var c = new Vector3(0.25f + r * 0.6f, 0f, 0f);
+            mb.Tube(c + Vector3.down * h * 0.45f, c + Vector3.up * h * 0.45f, r * 0.35f, 16, m["dark_metal"]);
+            for (int k = 0; k < 8; k++)
+            {
+                float a = k * Mathf.PI / 4f;
+                var dir = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                mb.Box(c + dir * r * 0.6f, new Vector3(Mathf.Abs(dir.x) * r * 0.5f + 0.02f, h * 0.85f, Mathf.Abs(dir.z) * r * 0.5f + 0.02f), m["dark_metal"]);
+            }
+        }
+
+        static void Lamp(float r, MeshBuilder mb, Mats m)
+        {
+            mb.Box(new Vector3(0.03f, 0f, 0f), new Vector3(0.06f, 0.15f, 0.15f), m["dark_metal"]);
+            var saved = mb.transform;
+            mb.transform = saved * Matrix4x4.TRS(new Vector3(0.08f, 0f, 0f), Quaternion.Euler(0f, 0f, -90f), Vector3.one);
+            mb.Lathe(P(0f, 0f, r * 0.5f, 0f, r * 0.7f, r * 0.8f), 16, m["dark_metal"]);
+            mb.Lathe(P(r * 0.68f, r * 0.8f, 0f, r * 0.82f), 16, m["screen_glow"]);
+            mb.transform = saved;
+        }
+
+        static void Ladder(float h, MeshBuilder mb, Mats m)
+        {
+            float off = 0.12f, w = 0.22f;
+            mb.Box(new Vector3(off, 0f, -w), new Vector3(0.04f, h, 0.04f), m["aluminium"]);
+            mb.Box(new Vector3(off, 0f, w), new Vector3(0.04f, h, 0.04f), m["aluminium"]);
+            for (float y = -h / 2 + 0.15f; y < h / 2; y += 0.3f) mb.Box(new Vector3(off, y, 0f), new Vector3(0.03f, 0.03f, w * 2f), m["aluminium"]);
+            mb.Box(new Vector3(0.05f, h * 0.4f, 0f), new Vector3(0.1f, 0.06f, 0.1f), m["dark_metal"]);
+            mb.Box(new Vector3(0.05f, -h * 0.4f, 0f), new Vector3(0.1f, 0.06f, 0.1f), m["dark_metal"]);
+        }
+
+        static void EscapeTower(float r, float h, MeshBuilder mb, Mats m)
+        {
+            float y0 = -h / 2;
+            // truss legs onto the capsule nose
+            for (int k = 0; k < 4; k++)
+            {
+                float a = k * Mathf.PI * 0.5f;
+                var foot = new Vector3(Mathf.Cos(a) * r, y0, Mathf.Sin(a) * r);
+                var top = new Vector3(Mathf.Cos(a) * r * 0.35f, y0 + h * 0.35f, Mathf.Sin(a) * r * 0.35f);
+                mb.Tube(foot, top, 0.03f, 6, m["tower_steel"]);
+                mb.Tube(foot, new Vector3(Mathf.Cos(a + Mathf.PI / 2) * r * 0.35f, y0 + h * 0.35f, Mathf.Sin(a + Mathf.PI / 2) * r * 0.35f), 0.02f, 6, m["tower_steel"]);
+            }
+            float rr = r * 0.4f;
+            mb.Lathe(P(rr * 1.2f, y0 + h * 0.35f, rr, y0 + h * 0.4f, rr, y0 + h * 0.82f, rr * 0.6f, y0 + h * 0.92f, 0.04f, y0 + h), 16, m["white"]);
+            for (int k = 0; k < 4; k++)
+            {
+                float a = k * Mathf.PI * 0.5f + Mathf.PI * 0.25f;
+                var n = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                mb.Tube(n * rr * 0.6f + Vector3.up * (y0 + h * 0.43f), n * rr * 1.3f + Vector3.up * (y0 + h * 0.36f), 0.05f, 8, m["nozzle"]);
+            }
+            mb.Lathe(P(rr * 1.02f, y0 + h * 0.62f, rr * 1.02f, y0 + h * 0.66f), 16, m["light_red"]);
+        }
+
+        static void DecalPanel(float w, float h, MeshBuilder mb, Mats m)
+        {
+            mb.Box(new Vector3(0.015f, 0f, 0f), new Vector3(0.03f, h, w), m["white"]);
+        }
+
+        static void CrewCabin(float r, float h, MeshBuilder mb, Mats m)
+        {
+            int seg = Segs(r);
+            mb.Lathe(P(r, -h / 2, r, h / 2), seg, m["white"]);
+            mb.Lathe(P(r * 1.01f, -h / 2, r * 1.01f, -h / 2 + 0.12f), seg, m["dark_metal"]);
+            mb.Lathe(P(r * 1.01f, h / 2 - 0.12f, r * 1.01f, h / 2), seg, m["dark_metal"]);
+            for (int k = 0; k < 6; k++)
+            {
+                float a = k * Mathf.PI / 3f;
+                var n = new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a));
+                mb.Box(n * (r + 0.01f), new Vector3(0.05f + Mathf.Abs(n.x) * 0.02f, 0.45f, 0.45f), m["glass"]);
+            }
         }
 
         /// <summary>Square lattice beam: four longerons with X-bracing on every face.</summary>

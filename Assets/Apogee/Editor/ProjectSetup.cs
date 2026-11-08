@@ -18,7 +18,7 @@ namespace Apogee.EditorTools
     [InitializeOnLoad]
     public static class ProjectSetup
     {
-        public const string SetupVersion = "3";
+        public const string SetupVersion = "4";
         const string MarkerPath = "ProjectSettings/ApogeeSetup.txt";
         public const string MainMenuScene = "Assets/Scenes/MainMenu.unity";
         public const string BuilderScene = "Assets/Scenes/Builder.unity";
@@ -187,7 +187,7 @@ namespace Apogee.EditorTools
             if (lit == null) lit = Shader.Find("Standard");
             Mat("PartLit", lit, false);
             Mat("PartLitEmissive", lit, true);
-            foreach (var n in new[] { "Planet", "Atmosphere", "Stars", "Ghost", "Marker", "Flame", "Smoke", "VertexColor", "Ground" })
+            foreach (var n in new[] { "Planet", "Atmosphere", "Stars", "Ghost", "Marker", "Flame", "Smoke", "VertexColor", "Ground", "Terrain", "Sky", "Unlit", "Ring", "Line" })
             {
                 var s = Shader.Find("Apogee/" + n);
                 if (s == null) { Debug.LogError("[Apogee] Shader Apogee/" + n + " missing."); continue; }

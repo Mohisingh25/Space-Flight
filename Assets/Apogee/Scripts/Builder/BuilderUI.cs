@@ -61,7 +61,7 @@ namespace Apogee.Builder
         RectTransform root;
 
         // top bar
-        Button nameButton, undoButton, redoButton, symButton, stagingButton, modeButton, insideButton;
+        Button nameButton, undoButton, redoButton, symButton, stagingButton, modeButton, insideButton, mirrorButton;
         bool paletteOpen;
         int paletteFor = -1;
 
@@ -169,6 +169,8 @@ namespace Apogee.Builder
             UIFactory.Size(modeButton, 100);
             insideButton = UIFactory.Button(row, "Inside", c.ToggleInside);
             UIFactory.Size(insideButton, 120);
+            mirrorButton = UIFactory.Button(row, "Mirror", c.ToggleMirror);
+            UIFactory.Size(mirrorButton, 120);
             UIFactory.Size(UIFactory.Button(row, "New", c.NewDesign), 100);
             UIFactory.Size(UIFactory.Button(row, "Open", c.OpenLoadDialog), 100);
             UIFactory.Size(UIFactory.Button(row, "Save", c.Save), 110);
@@ -202,6 +204,7 @@ namespace Apogee.Builder
             stagingButton = UIFactory.Button(r2, "Stages", () => { c.StagingOpen = !c.StagingOpen; Refresh(); }, ButtonStyle.Normal, 22);
             modeButton = UIFactory.Button(r2, "2D", c.ToggleMode2D, ButtonStyle.Normal, 22);
             insideButton = UIFactory.Button(r2, "Inside", c.ToggleInside, ButtonStyle.Normal, 22);
+            mirrorButton = UIFactory.Button(r2, "Mirror", c.ToggleMirror, ButtonStyle.Normal, 22);
             UIFactory.Button(r2, "New", c.NewDesign, ButtonStyle.Normal, 22);
             UIFactory.Button(r2, "Open", c.OpenLoadDialog, ButtonStyle.Normal, 22);
             UIFactory.Button(r2, "Save", c.Save, ButtonStyle.Normal, 22);
@@ -427,6 +430,7 @@ namespace Apogee.Builder
             UIFactory.SetButtonColor(stagingButton, c.StagingOpen ? Theme.ButtonPrimary : Theme.ButtonBg);
             UIFactory.SetLabel(modeButton, c.Mode2D ? "3D" : "2D");
             UIFactory.SetButtonColor(insideButton, c.InsideView ? Theme.ButtonPrimary : Theme.ButtonBg);
+            UIFactory.SetButtonColor(mirrorButton, c.MirrorMode ? Theme.ButtonPrimary : Theme.ButtonBg);
 
             emptyHint.gameObject.SetActive(c.Bp.IsEmpty && !c.IsHolding);
             holdBar.gameObject.SetActive(c.IsHolding);
@@ -493,6 +497,7 @@ namespace Apogee.Builder
             }
             if (paletteFor != p.uid) { paletteOpen = false; paletteFor = p.uid; }
             if (def.Paintable) tools.Add(new KeyValuePair<string, System.Action>(paletteOpen ? "Paint ▲" : "Paint", () => { paletteOpen = !paletteOpen; Refresh(); }));
+            if (def.isDecal) tools.Add(new KeyValuePair<string, System.Action>("Logo", c.EditLogo));
             tools.Add(new KeyValuePair<string, System.Action>("Duplicate", c.DuplicateSelected));
             tools.Add(new KeyValuePair<string, System.Action>("Delete", c.DeleteSelected));
 

@@ -455,6 +455,7 @@ namespace Apogee.Builder
         void StartHold(HeldAssembly h, bool fromDrag)
         {
             held = h;
+            held.mirror = MirrorMode;
             holdFromListDrag = fromDrag;
             held.symmetry = held.symmetry > 1 ? held.symmetry : Symmetry;
             ghostKey = null;
@@ -860,6 +861,19 @@ namespace Apogee.Builder
             dialogs.Toast("Staging reset to automatic order.", Theme.Accent);
         }
 
+        /// <summary>Mirror mode: side parts are also placed as a mirror image on the opposite side.</summary>
+        public bool MirrorMode { get; private set; }
+
+        public void ToggleMirror()
+        {
+            MirrorMode = !MirrorMode;
+            if (held != null) held.mirror = MirrorMode;
+            audioMgr.Play(Sfx.Click);
+            dialogs.Toast(MirrorMode ? "Mirror on: side parts get a mirror-image twin" : "Mirror off", Theme.Accent, 1.8f);
+            if (Changed != null) Changed();
+            if (HoldChanged != null) HoldChanged();
+        }
+
         /// <summary>See-through view of the whole rocket: propellant, engines, crew and payload inside.</summary>
         public bool InsideView { get; private set; }
 
@@ -882,6 +896,23 @@ namespace Apogee.Builder
             foreach (var m in Bp.SymmetryMembers(p)) m.paint = paint;
             Refresh();
             Select(uid);
+        }
+
+        /// <summary>Asks for the text shown on the selected Logo Panel (and its symmetry copies).</summary>
+        public void EditLogo()
+        {
+            var p = Selected;
+            if (p == null || !p.Def.isDecal) return;
+            int uid = p.uid;
+            dialogs.Prompt("Logo text", string.IsNullOrEmpty(p.label) ? "APOGEE" : p.label, "Apply", text =>
+            {
+                var q = Bp.Find(uid);
+                if (q == null) return;
+                PushUndo();
+                foreach (var m in Bp.SymmetryMembers(q)) m.label = (text ?? "").Trim().ToUpperInvariant();
+                Refresh();
+                Select(uid);
+            });
         }
 
         public void PaintAll(int paint)

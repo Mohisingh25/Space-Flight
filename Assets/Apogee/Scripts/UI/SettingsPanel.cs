@@ -45,6 +45,10 @@ namespace Apogee.UI
             UIFactory.ToggleRow(c, "Unbreakable parts (no crashes)", s.cheatUnbreakable, on => { s.cheatUnbreakable = on; s.Save(); });
             UIFactory.ToggleRow(c, "Super thrust (5× engines)", s.cheatSuperThrust, on => { s.cheatSuperThrust = on; s.Save(); });
 
+            UIFactory.Header(c, "Credits");
+            var cr = UIFactory.Label(c, "Planet maps: Solar System Scope (solarsystemscope.com), CC BY 4.0, based on NASA imagery and data.", 19, Theme.Muted);
+            UIFactory.Size(cr, -1, 52);
+
             UIFactory.Header(c, "Language");
             var lang = UIFactory.Label(c, "English (more languages planned)", 24, Theme.Text);
             UIFactory.Size(lang, -1, 50);

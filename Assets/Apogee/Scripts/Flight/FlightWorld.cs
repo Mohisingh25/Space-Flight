@@ -4,248 +4,187 @@ using Apogee.Parts;
 using Apogee.Rendering;
 using Apogee.Rocket;
 using Apogee.Simulation;
+using Apogee.Astro;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace Apogee.Flight
 {
-    /// <summary>Colours of the planet's surface along the flight plane (sampled from the generated Earth map).</summary>
-    public class EquatorBand
-    {
-        const int N = 2048;
-        readonly Color[] colors = new Color[N];
-        readonly bool[] ocean = new bool[N];
-        double offset; // fraction of a turn, chosen so the launch site sits on land
+    public enum CamMode { Chase, Free, Cockpit, LaunchCam }
 
-        public EquatorBand()
+    /// <summary>
+    /// Landing leg built from moving pieces: the strut swings down from the hull, the inner piston
+    /// telescopes out, and the shock absorber compresses under the vehicle's weight after touchdown.
+    /// </summary>
+    public class LegRig : MonoBehaviour
+    {
+        Transform pivot, piston;
+        Vector3 dirDeployed;
+        float length;
+        public float deploy = 1f, compress;
+
+        public static LegRig Build(GameObject part, float h)
         {
-            var tex = PlanetFactory.LoadCachedEarthAlbedo();
-            if (tex == null)
-            {
-                for (int i = 0; i < N; i++)
-                {
-                    float n = Mathf.Sin(i * 0.011f) * 0.5f + Mathf.Sin(i * 0.0037f + 1.3f) * 0.5f;
-                    ocean[i] = n < -0.25f;
-                    colors[i] = ocean[i] ? new Color(0.05f, 0.2f, 0.38f) : Color.Lerp(new Color(0.3f, 0.38f, 0.17f), new Color(0.55f, 0.48f, 0.32f), n * 0.5f + 0.5f);
-                }
-            }
-            else
-            {
-                for (int i = 0; i < N; i++)
-                {
-                    var c = tex.GetPixelBilinear((float)i / N, 0.5f);
-                    ocean[i] = c.a > 0.5f;
-                    c.a = 1f;
-                    colors[i] = ocean[i] ? new Color(c.r * 1.2f + 0.02f, c.g * 1.25f + 0.05f, c.b * 1.2f + 0.08f) : c * 1.15f;
-                }
-            }
-            // Find the longest stretch of land and put the launch site (angle 90°) in its middle.
-            int bestStart = 0, bestLen = 0;
-            for (int s = 0; s < N; s++)
-            {
-                if (ocean[s] || !ocean[(s - 1 + N) % N]) continue;
-                int len = 0;
-                while (len < N && !ocean[(s + len) % N]) len++;
-                if (len > bestLen) { bestLen = len; bestStart = s; }
-            }
-            if (bestLen == 0) bestStart = 0;
-            double centre = (bestStart + bestLen * 0.5) / N;
-            offset = centre - 0.25; // phi = 90° is a quarter turn
+            var rig = part.AddComponent<LegRig>();
+            var hip = new Vector3(0.12f, h * 0.3f, 0f);
+            var foot = new Vector3(0.95f, -h / 2 + 0.12f, 0f) * (h > 3f ? 1.25f : 1f);
+            foot.y = -h / 2 + 0.12f;
+            rig.dirDeployed = (foot - hip).normalized;
+            rig.length = (foot - hip).magnitude;
+
+            var housing = new MeshBuilder();
+            housing.Box(new Vector3(0.06f, h * 0.3f, 0f), new Vector3(0.14f, 0.45f, 0.34f), 0);
+            Child(part.transform, "Housing", housing, "dark_metal");
+
+            rig.pivot = new GameObject("Strut").transform;
+            rig.pivot.SetParent(part.transform, false);
+            rig.pivot.localPosition = hip;
+            var outer = new MeshBuilder();
+            outer.Tube(Vector3.zero, rig.dirDeployed * rig.length * 0.62f, 0.085f, 12, 0);
+            outer.Tube(rig.dirDeployed * rig.length * 0.1f, rig.dirDeployed * rig.length * 0.3f, 0.1f, 12, 0);
+            Child(rig.pivot, "Outer", outer, "carbon");
+
+            rig.piston = new GameObject("Piston").transform;
+            rig.piston.SetParent(rig.pivot, false);
+            var inner = new MeshBuilder();
+            inner.Tube(rig.dirDeployed * rig.length * 0.4f, rig.dirDeployed * rig.length, 0.055f, 10, 0);
+            Child(rig.piston, "Inner", inner, "aluminium");
+            var pad = new MeshBuilder();
+            pad.transform = Matrix4x4.TRS(rig.dirDeployed * rig.length, Quaternion.identity, Vector3.one);
+            pad.Lathe(new List<Vector2> { new Vector2(0f, -0.02f), new Vector2(0.28f, -0.02f), new Vector2(0.24f, 0.09f), new Vector2(0.08f, 0.13f) }, 20, 0);
+            Child(rig.piston, "Foot", pad, "aluminium");
+            return rig;
         }
 
-        int Index(double phi)
+        static void Child(Transform parent, string name, MeshBuilder mb, string mat)
         {
-            double f = phi / (2 * System.Math.PI) + offset;
-            f -= System.Math.Floor(f);
-            return Mathf.Clamp((int)(f * N), 0, N - 1);
+            var go = new GameObject(name);
+            go.layer = parent.gameObject.layer;
+            go.transform.SetParent(parent, false);
+            go.AddComponent<MeshFilter>().sharedMesh = mb.ToMesh(name);
+            var r = go.AddComponent<MeshRenderer>();
+            r.sharedMaterial = MaterialLibrary.Get(mat);
+            r.shadowCastingMode = ShadowCastingMode.On;
         }
 
-        public Color Sample(double phi) { return colors[Index(phi)]; }
-        public bool IsOcean(double phi) { return ocean[Index(phi)]; }
-    }
-
-    class FlameFx
-    {
-        public Transform t;
-        public Material mat;
-        public float exitDiameter;
-        public int uid;
-        public float current;
+        /// <summary>deploy 0 = stowed against the hull, 1 = locked down. Swing first, then telescope.</summary>
+        public void Apply()
+        {
+            float swing = Mathf.Clamp01(deploy / 0.65f);
+            float extend = Mathf.Clamp01((deploy - 0.65f) / 0.35f);
+            swing = swing * swing * (3f - 2f * swing);
+            // stowed: strut folded up along the hull (like a booster's landing legs)
+            pivot.localRotation = Quaternion.Euler(0f, 0f, Mathf.Lerp(150f, 0f, swing));
+            float travel = length * 0.42f;
+            float offset = -travel * (1f - extend) - length * 0.12f * compress * extend;
+            piston.localPosition = dirDeployed * offset;
+        }
     }
 
     /// <summary>
-    /// Renders the flight: the vehicle and its exhaust, separated debris, the curved ground and ocean
-    /// along the flight plane, the launch complex, clouds, sky colour by altitude, stars and the
-    /// atmosphere glow seen from orbit. Uses a floating origin centred on the vehicle so it stays
-    /// precise anywhere in the solar system.
+    /// Renders the flight: the Solar System (scaled space) behind, and in front the rocket with paint,
+    /// 3D engine plumes, RCS jets, folding legs, parachutes, re-entry plasma, smoke, debris, explosions,
+    /// nearby terrain and the launch complex. Floating origin: the vessel's centre of mass is at (0,0,0).
     /// </summary>
     public class FlightWorld : MonoBehaviour
     {
-        public Vector2d origin;
-        public EquatorBand band;
-
+        public Camera cam;
+        public SpaceView space;
+        public LocalTerrain terrain;
+        public LaunchComplex site;
+        public Light sun;
         FlightVessel vessel;
-        Camera cam;
+
         Transform vesselRoot;
         readonly Dictionary<int, GameObject> partObjects = new Dictionary<int, GameObject>();
-        readonly List<FlameFx> flames = new List<FlameFx>();
-        readonly Dictionary<Debris, Transform> debrisRoots = new Dictionary<Debris, Transform>();
-        readonly Dictionary<int, float> foldAnim = new Dictionary<int, float>();   // 0 = deployed, 1 = folded
-        readonly HashSet<int> foldApplied = new HashSet<int>();
+        readonly Dictionary<int, LegRig> legs = new Dictionary<int, LegRig>();
+        readonly Dictionary<int, float> solarAnim = new Dictionary<int, float>();
         readonly Dictionary<int, Transform> canopies = new Dictionary<int, Transform>();
+        readonly Dictionary<Debris, Transform> debrisRoots = new Dictionary<Debris, Transform>();
         Mesh canopyMesh;
         bool xray;
         public bool XRayOn { get { return xray; } }
 
-        Mesh groundMesh, atmoMesh;
-        Material groundMat, atmoMat, starMat;
-        Transform ground, atmo, stars, pad, padAnchor;
-        readonly List<Transform> clouds = new List<Transform>();
-        readonly List<Vector2d> cloudPos = new List<Vector2d>();
+        class FlameFx { public Transform t; public Material mat; public float exitDiameter, current; public int uid; }
+        readonly List<FlameFx> flames = new List<FlameFx>();
+        readonly List<FlameFx> rcsJets = new List<FlameFx>();
         ParticleSystem smoke, blast;
-        Light sun;
+        Transform smokeAnchor;
+        Transform plasma;
+        Material plasmaMat;
 
-        const int Segments = 320;
-        readonly List<Vector3> gv = new List<Vector3>();
-        readonly List<Color> gc = new List<Color>();
-        readonly List<Vector2> guv = new List<Vector2>();
-        readonly List<int> gt = new List<int>();
-        readonly List<Vector3> av = new List<Vector3>();
-        readonly List<Color> ac = new List<Color>();
-        readonly List<int> at = new List<int>();
+        // camera state
+        public CamMode camMode = CamMode.LaunchCam;
+        public float camYaw = 35f, camPitch = 8f, camDistance = 60f, camDistanceGoal = 60f;
+        public float headYaw, headPitch;
+        Vector3 launchCamPos;
+        public Vector3d ViewerFrame { get; private set; }
 
-        public Vector3 ToRender(Vector2d p) { return new Vector3((float)(p.x - origin.x), (float)(p.y - origin.y), 0f); }
-
-        public static Quaternion RotationFor(double angle) { return Quaternion.Euler(0f, 0f, (float)(angle * Mathf.Rad2Deg) - 90f); }
-
-        public void Init(FlightVessel v, Camera camera)
+        public void Init(FlightVessel v)
         {
             vessel = v;
-            cam = camera;
-            band = new EquatorBand();
+            var spaceGo = new GameObject("Scaled Space");
+            space = spaceGo.AddComponent<SpaceView>();
+            space.Init();
 
-            var sunGo = new GameObject("Sun");
-            sun = sunGo.AddComponent<Light>();
+            var camGo = new GameObject("Flight Camera");
+            cam = camGo.AddComponent<Camera>();
+            cam.clearFlags = CameraClearFlags.Depth;
+            cam.cullingMask = ~((1 << SpaceView.Layer) | (1 << 29));
+            cam.nearClipPlane = 0.25f;
+            cam.farClipPlane = 160000f;
+            cam.fieldOfView = 55f;
+            cam.depth = 0;
+            camGo.tag = "MainCamera";
+            camGo.AddComponent<AudioListener>();
+
+            StackOverlay(space.cam, cam);
+
+            var lightGo = new GameObject("Sun");
+            sun = lightGo.AddComponent<Light>();
             sun.type = LightType.Directional;
-            sun.intensity = 1.6f;
-            sun.color = new Color(1f, 0.97f, 0.92f);
+            sun.intensity = 1.25f;
             sun.shadows = LightShadows.Soft;
-            sunGo.transform.rotation = Quaternion.LookRotation(new Vector3(-0.55f, -0.45f, 0.7f));
-            RenderSettings.sun = sun;
-            RenderSettings.fog = false;
-            RenderSettings.skybox = null;
-            RenderSettings.ambientMode = AmbientMode.Trilight;
-            RenderSettings.ambientSkyColor = new Color(0.55f, 0.62f, 0.75f);
-            RenderSettings.ambientEquatorColor = new Color(0.42f, 0.44f, 0.46f);
-            RenderSettings.ambientGroundColor = new Color(0.25f, 0.22f, 0.18f);
-            DynamicGI.UpdateEnvironment();
+            sun.color = new Color(1f, 0.97f, 0.92f);
+            RenderSettings.ambientMode = AmbientMode.Flat;
 
-            // Ground and atmosphere meshes are rebuilt every frame around the vehicle.
-            groundMesh = new Mesh { name = "Ground Arc" };
-            groundMesh.MarkDynamic();
-            groundMat = MaterialLibrary.Custom("Ground");
-            groundMat.SetTexture("_MainTex", ProceduralTextures.Get("soil"));
-            ground = MakeObject("Ground", groundMesh, groundMat).transform;
-            atmoMesh = new Mesh { name = "Atmosphere Arc" };
-            atmoMesh.MarkDynamic();
-            atmoMat = MaterialLibrary.Custom("VertexColor");
-            atmo = MakeObject("Atmosphere", atmoMesh, atmoMat).transform;
+            terrain = new GameObject("Local Terrain").AddComponent<LocalTerrain>();
+            terrain.Init();
+            site = new GameObject("Launch Complex").AddComponent<LaunchComplex>();
+            site.Build(SolarSystem.Earth, vessel.LaunchLat, vessel.LaunchLon);
+            smokeAnchor = site.transform;
 
-            starMat = MaterialLibrary.Custom("Stars");
-            starMat.SetTexture("_MainTex", ProceduralTextures.Glow(64));
-            stars = MakeObject("Stars", PlanetFactory.StarField(3500, 9000f, 11), starMat).transform;
-
-            BuildPad();
-            BuildClouds();
             BuildVessel();
             BuildParticles();
+            BuildPlasma();
+            vessel.OnDebris += AddDebris;
+            vessel.OnExplosion += (p, size) => Explode((p - vessel.pos).ToFloat(), size);
         }
 
-        static GameObject MakeObject(string name, Mesh mesh, Material mat)
+        /// <summary>
+        /// URP composites cameras through a camera stack: the Solar System camera is the base, the flight camera
+        /// an overlay drawn on top (clearing only depth). Done via reflection so the code also builds without URP.
+        /// </summary>
+        public static void StackOverlay(Camera baseCam, Camera overlay)
         {
-            var go = new GameObject(name);
-            go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var r = go.AddComponent<MeshRenderer>();
-            r.sharedMaterial = mat;
-            r.shadowCastingMode = ShadowCastingMode.Off;
-            r.receiveShadows = false;
-            return go;
+            try
+            {
+                var t = System.Type.GetType("UnityEngine.Rendering.Universal.UniversalAdditionalCameraData, Unity.RenderPipelines.Universal.Runtime");
+                var rt = System.Type.GetType("UnityEngine.Rendering.Universal.CameraRenderType, Unity.RenderPipelines.Universal.Runtime");
+                if (t == null || rt == null) return;
+                var od = overlay.GetComponent(t) ?? overlay.gameObject.AddComponent(t);
+                t.GetProperty("renderType").SetValue(od, System.Enum.Parse(rt, "Overlay"), null);
+                var bd = baseCam.GetComponent(t) ?? baseCam.gameObject.AddComponent(t);
+                t.GetProperty("renderType").SetValue(bd, System.Enum.Parse(rt, "Base"), null);
+                var stack = t.GetProperty("cameraStack").GetValue(bd, null) as System.Collections.IList;
+                if (stack != null && !stack.Contains(overlay)) stack.Add(overlay);
+                var shadows = t.GetProperty("renderShadows");
+                if (shadows != null) shadows.SetValue(bd, false, null);
+            }
+            catch (System.Exception e) { Debug.LogWarning("Camera stacking unavailable: " + e.Message); }
         }
 
-        // ------------------------------------------------------------------ construction
-
-        void BuildPad()
-        {
-            var mb = new MeshBuilder();
-            float top = (float)FlightVessel.PadTop;
-            float half = (float)FlightVessel.PadHalfWidth;
-            mb.Box(new Vector3(0f, top * 0.5f, 0f), new Vector3(half * 2f, top, 40f), 0);                   // concrete pad
-            mb.Box(new Vector3(0f, top + 0.02f, -6f), new Vector3(10f, 0.05f, 1f), 2);                        // hazard line
-            mb.Box(new Vector3(0f, top * 0.5f, 0f), new Vector3(9f, top + 0.05f, 9f), 1);                     // flame deflector
-            for (int i = 0; i < 4; i++)
-            {
-                float x = (i < 2 ? -1f : 1f) * 3.2f, z = (i % 2 == 0 ? -1f : 1f) * 3.2f;
-                mb.Box(new Vector3(x, top + 0.6f, z), new Vector3(0.8f, 1.2f, 0.8f), 1);                   // hold-down clamps
-            }
-            // Service tower with access arms
-            float tx = -17f, th = 72f, tw = 2f;
-            Vector3[] c = { new Vector3(tx - tw, 0, -tw), new Vector3(tx + tw, 0, -tw), new Vector3(tx + tw, 0, tw), new Vector3(tx - tw, 0, tw) };
-            foreach (var p in c) mb.Box(p + Vector3.up * (top + th * 0.5f), new Vector3(0.4f, th, 0.4f), 3);
-            for (float y = top; y <= top + th; y += 4f)
-                for (int i = 0; i < 4; i++)
-                {
-                    var a = c[i] + Vector3.up * y;
-                    var b = c[(i + 1) % 4] + Vector3.up * y;
-                    mb.Box((a + b) * 0.5f, new Vector3(Mathf.Abs(b.x - a.x) + 0.3f, 0.25f, Mathf.Abs(b.z - a.z) + 0.3f), 3);
-                    if (y + 4f <= top + th) mb.Tube(a, c[(i + 1) % 4] + Vector3.up * (y + 4f), 0.08f, 6, 3);
-                }
-            foreach (float y in new[] { 16f, 30f, 46f })
-                mb.Box(new Vector3(tx + tw + 3.2f, top + y, 0f), new Vector3(6.4f, 1.2f, 1.6f), 4);
-            mb.Box(new Vector3(tx, top + th + 0.6f, 0f), new Vector3(1f, 1.2f, 1f), 5); // beacon
-            // Lightning masts and floodlight poles
-            foreach (float x in new[] { -half + 2f, half - 2f })
-            {
-                mb.Box(new Vector3(x, top + 12f, 12f), new Vector3(0.3f, 24f, 0.3f), 4);
-                mb.Box(new Vector3(x, top + 24f, 12f), new Vector3(2f, 0.6f, 0.6f), 6);
-            }
-            var go = new GameObject("Launch Complex");
-            go.AddComponent<MeshFilter>().sharedMesh = mb.ToMesh("Pad");
-            var r = go.AddComponent<MeshRenderer>();
-            r.sharedMaterials = new[]
-            {
-                MaterialLibrary.Get("pad_steel"), MaterialLibrary.Get("dark_metal"), MaterialLibrary.Get("hazard"),
-                MaterialLibrary.Get("tower_steel"), MaterialLibrary.Get("aluminium"), MaterialLibrary.Get("light_red"), MaterialLibrary.Get("light_strip")
-            };
-            r.shadowCastingMode = ShadowCastingMode.On;
-            pad = go.transform;
-            padAnchor = new GameObject("Pad Anchor").transform;
-        }
-
-        void BuildClouds()
-        {
-            var rng = new System.Random(7);
-            var quad = PlanetFactory.Quad();
-            var mat = MaterialLibrary.Custom("Smoke");
-            mat.SetColor("_Color", new Color(1f, 1f, 1f, 0.62f));
-            mat.SetFloat("_Softness", 1.3f);
-            for (int i = 0; i < 26; i++)
-            {
-                double phi = System.Math.PI / 2 + (rng.NextDouble() - 0.5) * 0.06;
-                double alt = 1500 + rng.NextDouble() * 5500;
-                float w = 500f + (float)rng.NextDouble() * 1400f;
-                for (int k = 0; k < 4; k++)
-                {
-                    double dphi = (rng.NextDouble() - 0.5) * w / FlightVessel.R;
-                    double dalt = (rng.NextDouble() - 0.5) * w * 0.15;
-                    var go = MakeObject("Cloud", quad, mat);
-                    float s = w * (0.45f + (float)rng.NextDouble() * 0.4f);
-                    go.transform.localScale = new Vector3(s, s * 0.45f, 1f);
-                    clouds.Add(go.transform);
-                    double r = FlightVessel.R + alt + dalt;
-                    cloudPos.Add(new Vector2d(System.Math.Cos(phi + dphi) * r, System.Math.Sin(phi + dphi) * r));
-                }
-            }
-        }
+        // ------------------------------------------------------------------ vessel
 
         void BuildVessel()
         {
@@ -257,6 +196,7 @@ namespace Apogee.Flight
                 if (!vessel.poses.TryGetValue(p.uid, out pose)) continue;
                 var model = PartMeshFactory.Get(p);
                 var go = new GameObject("Part_" + p.partId);
+                go.layer = RocketView.PartLayer;
                 go.transform.SetParent(vesselRoot, false);
                 go.transform.localPosition = pose.position;
                 go.transform.localRotation = pose.rotation;
@@ -265,62 +205,129 @@ namespace Apogee.Flight
                 r.sharedMaterials = model.materials;
                 r.shadowCastingMode = ShadowCastingMode.On;
                 PartPaint.Apply(r, model.materialKeys, p.paint, new MaterialPropertyBlock());
-                // Tappable in flight: engines on/off, fold legs and arrays, deploy chutes, separate...
-                go.layer = RocketView.PartLayer;
+                DecalText.Attach(go, p);
                 go.AddComponent<MeshCollider>().sharedMesh = model.mesh;
                 var pv = go.AddComponent<PartView>();
                 pv.uid = p.uid;
                 pv.part = p;
                 partObjects[p.uid] = go;
-                if (p.Def.Foldable) foldAnim[p.uid] = vessel.folded.Contains(p.uid) ? 1f : 0f;
-
                 var d = p.Def;
-                if (d.IsEngine)
+                var dims = PartDims.Of(p);
+                if (d.isLeg)
                 {
-                    var dims = PartDims.Of(p);
+                    r.enabled = false;                    // replaced by the moving rig (collider stays for tapping)
+                    var rig = LegRig.Build(go, dims.height);
+                    rig.deploy = vessel.folded.Contains(p.uid) ? 0f : 1f;
+                    rig.Apply();
+                    legs[p.uid] = rig;
+                }
+                if (d.solarKW > 0f) solarAnim[p.uid] = vessel.folded.Contains(p.uid) ? 1f : 0f;
+                if (d.IsEngine && !d.isRcs)
+                {
                     float exit = d.shape == PartShape.VacuumEngine ? dims.Radius * 2.64f : d.shape == PartShape.SolidBooster ? dims.Radius * 1.2f : dims.Radius * (d.minThrottle <= 0.15f ? 1.64f : 1.76f);
-                    var fgo = MakeObject("Flame", FlameQuad(), new Material(flameBase));
-                    fgo.transform.SetParent(go.transform, false);
-                    fgo.transform.localPosition = new Vector3(0f, -dims.height * 0.5f + 0.05f, 0f);
-                    var fx = new FlameFx { t = fgo.transform, mat = fgo.GetComponent<MeshRenderer>().sharedMaterial, exitDiameter = exit, uid = p.uid };
-                    // Colour by propellant: kerolox orange, methalox blue-white, solids bright yellow-white
-                    Color col = d.solidFuel ? new Color(1f, 0.72f, 0.35f) : d.shape == PartShape.Engine && d.finish == Finish.Stainless ? new Color(0.55f, 0.6f, 1f) : new Color(1f, 0.5f, 0.18f);
+                    var fx = MakeFlame(go.transform, new Vector3(0f, -dims.height * 0.5f + 0.05f, 0f), Quaternion.identity, new Material(flameBase), exit, p.uid);
+                    Color col = d.solidFuel ? new Color(1f, 0.72f, 0.35f) : d.finish == Finish.Stainless ? new Color(0.55f, 0.6f, 1f) : new Color(1f, 0.5f, 0.18f);
                     fx.mat.SetColor("_Color", col);
-                    fgo.SetActive(false);
                     flames.Add(fx);
+                }
+                if (d.isRcs)
+                {
+                    // four nozzles around the block: white puffs of cold gas
+                    for (int k = 0; k < 4; k++)
+                    {
+                        var dir = Quaternion.Euler(0f, 0f, k * 90f) * Vector3.up;
+                        var m = new Material(flameBase);
+                        m.SetColor("_Color", new Color(0.85f, 0.9f, 1f));
+                        m.SetColor("_Core", Color.white);
+                        var fx = MakeFlame(go.transform, new Vector3(0.18f, 0f, 0f) + dir * 0.12f, Quaternion.FromToRotation(Vector3.down, dir), m, 0.12f, p.uid);
+                        rcsJets.Add(fx);
+                    }
                 }
             }
         }
 
-        static Mesh flameQuad;
-        static Mesh FlameQuad()
+        FlameFx MakeFlame(Transform parent, Vector3 localPos, Quaternion localRot, Material mat, float exit, int uid)
         {
-            if (flameQuad != null) return flameQuad;
-            var m = new Mesh { name = "FlameQuad" };
-            m.SetVertices(new List<Vector3> { new Vector3(-0.5f, 0f, 0f), new Vector3(0.5f, 0f, 0f), new Vector3(0.5f, -1f, 0f), new Vector3(-0.5f, -1f, 0f) });
-            m.SetUVs(0, new List<Vector2> { new Vector2(0, 0), new Vector2(1, 0), new Vector2(1, 1), new Vector2(0, 1) });
-            m.SetTriangles(new List<int> { 0, 1, 2, 0, 2, 3 }, 0);
-            m.RecalculateBounds();
-            m.bounds = new Bounds(new Vector3(0, -0.5f, 0), new Vector3(2, 2, 2));
-            flameQuad = m;
-            return m;
+            var go = new GameObject("Flame");
+            go.layer = parent.gameObject.layer == RocketView.PartLayer ? 0 : parent.gameObject.layer;
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = localPos;
+            go.transform.localRotation = localRot;
+            go.AddComponent<MeshFilter>().sharedMesh = CrossedQuads();
+            var r = go.AddComponent<MeshRenderer>();
+            r.sharedMaterial = mat;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
+            go.SetActive(false);
+            return new FlameFx { t = go.transform, mat = mat, exitDiameter = exit, uid = uid };
         }
+
+        static Mesh crossed;
+        /// <summary>Three quads crossed around the axis: a plume that looks round from every angle in 3D.</summary>
+        static Mesh CrossedQuads()
+        {
+            if (crossed != null) return crossed;
+            var v = new List<Vector3>();
+            var uv = new List<Vector2>();
+            var t = new List<int>();
+            for (int k = 0; k < 3; k++)
+            {
+                var q = Quaternion.Euler(0f, k * 60f, 0f);
+                int b = v.Count;
+                v.Add(q * new Vector3(-0.5f, 0f, 0f)); v.Add(q * new Vector3(0.5f, 0f, 0f));
+                v.Add(q * new Vector3(0.5f, -1f, 0f)); v.Add(q * new Vector3(-0.5f, -1f, 0f));
+                uv.Add(new Vector2(0, 0)); uv.Add(new Vector2(1, 0)); uv.Add(new Vector2(1, 1)); uv.Add(new Vector2(0, 1));
+                t.Add(b); t.Add(b + 1); t.Add(b + 2); t.Add(b); t.Add(b + 2); t.Add(b + 3);
+                t.Add(b); t.Add(b + 2); t.Add(b + 1); t.Add(b); t.Add(b + 3); t.Add(b + 2);
+            }
+            crossed = new Mesh { name = "Plume" };
+            crossed.SetVertices(v);
+            crossed.SetUVs(0, uv);
+            crossed.SetTriangles(t, 0);
+            crossed.bounds = new Bounds(new Vector3(0, -0.5f, 0), new Vector3(2, 2, 2));
+            return crossed;
+        }
+
+        public void SetXRay(bool on)
+        {
+            xray = on;
+            foreach (var kv in partObjects)
+                if (kv.Value != null && !legs.ContainsKey(kv.Key)) XRay.Apply(kv.Value, vessel.state.byUid[kv.Key], on);
+        }
+
+        public void AddDebris(Debris d)
+        {
+            var root = new GameObject("Debris").transform;
+            foreach (int u in d.parts)
+            {
+                GameObject go;
+                if (partObjects.TryGetValue(u, out go) && go != null)
+                {
+                    go.transform.SetParent(root, false);
+                    partObjects.Remove(u);
+                    Transform c;
+                    if (canopies.TryGetValue(u, out c)) { Destroy(c.gameObject); canopies.Remove(u); }
+                }
+            }
+            debrisRoots[d] = root;
+        }
+
+        // ------------------------------------------------------------------ effects
 
         void BuildParticles()
         {
             var smat = MaterialLibrary.Custom("Smoke");
-            smoke = MakeSystem("Exhaust Smoke", smat, 800, false);
+            smoke = MakeSystem("Exhaust Smoke", smat, 900);
             var main = smoke.main;
-            main.startLifetime = new ParticleSystem.MinMaxCurve(5f, 9f);
-            main.startSpeed = new ParticleSystem.MinMaxCurve(10f, 22f);
-            main.startSize = new ParticleSystem.MinMaxCurve(3f, 7f);
-            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.92f, 0.9f, 0.88f, 0.55f), new Color(0.78f, 0.76f, 0.74f, 0.45f));
-            main.gravityModifier = -0.01f;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(5f, 10f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(12f, 28f);
+            main.startSize = new ParticleSystem.MinMaxCurve(3f, 8f);
+            main.startColor = new ParticleSystem.MinMaxGradient(new Color(0.94f, 0.92f, 0.9f, 0.55f), new Color(0.8f, 0.78f, 0.76f, 0.45f));
             var shape = smoke.shape;
             shape.enabled = true;
             shape.shapeType = ParticleSystemShapeType.Cone;
-            shape.angle = 14f;
-            shape.radius = 0.6f;
+            shape.angle = 16f;
+            shape.radius = 0.8f;
             var sol = smoke.sizeOverLifetime;
             sol.enabled = true;
             sol.size = new ParticleSystem.MinMaxCurve(1f, AnimationCurve.Linear(0f, 0.6f, 1f, 5f));
@@ -330,12 +337,12 @@ namespace Apogee.Flight
             g.SetKeys(new[] { new GradientColorKey(Color.white, 0f), new GradientColorKey(new Color(0.85f, 0.85f, 0.85f), 1f) },
                       new[] { new GradientAlphaKey(0.0f, 0f), new GradientAlphaKey(1f, 0.08f), new GradientAlphaKey(0.6f, 0.5f), new GradientAlphaKey(0f, 1f) });
             col.color = new ParticleSystem.MinMaxGradient(g);
-            var vel = smoke.limitVelocityOverLifetime;
-            vel.enabled = true;
-            vel.limit = new ParticleSystem.MinMaxCurve(6f);
-            vel.dampen = 0.08f;
+            var lim = smoke.limitVelocityOverLifetime;
+            lim.enabled = true;
+            lim.limit = new ParticleSystem.MinMaxCurve(6f);
+            lim.dampen = 0.08f;
 
-            blast = MakeSystem("Explosions", smat, 600, true);
+            blast = MakeSystem("Explosions", smat, 700);
             var bm = blast.main;
             bm.startLifetime = new ParticleSystem.MinMaxCurve(1.5f, 4f);
             bm.startSpeed = new ParticleSystem.MinMaxCurve(8f, 45f);
@@ -356,7 +363,7 @@ namespace Apogee.Flight
             bcol.color = new ParticleSystem.MinMaxGradient(bg);
         }
 
-        ParticleSystem MakeSystem(string name, Material mat, int max, bool burstOnly)
+        ParticleSystem MakeSystem(string name, Material mat, int max)
         {
             var go = new GameObject(name);
             var ps = go.AddComponent<ParticleSystem>();
@@ -366,47 +373,40 @@ namespace Apogee.Flight
             main.playOnAwake = false;
             main.maxParticles = max;
             main.simulationSpace = ParticleSystemSimulationSpace.Custom;
-            main.customSimulationSpace = padAnchor;
+            main.customSimulationSpace = smokeAnchor;
             var em = ps.emission;
             em.rateOverTime = 0f;
-            var pr = go.GetComponent<ParticleSystemRenderer>();
-            pr.sharedMaterial = mat;
-            pr.renderMode = ParticleSystemRenderMode.Billboard;
+            var r = go.GetComponent<ParticleSystemRenderer>();
+            r.sharedMaterial = mat;
+            r.renderMode = ParticleSystemRenderMode.Billboard;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            r.receiveShadows = false;
             ps.Play();
             return ps;
         }
 
-        // ------------------------------------------------------------------ debris & effects
-
-        /// <summary>Moves separated parts into their own object that follows the debris body.</summary>
-        public void AddDebris(Debris d)
+        void BuildPlasma()
         {
-            UpdateVesselTransform();
-            var root = new GameObject("Debris").transform;
-            root.position = ToRender(d.pos);
-            root.rotation = RotationFor(d.angle);
-            foreach (int u in d.parts)
-            {
-                GameObject go;
-                if (partObjects.TryGetValue(u, out go) && go != null)
-                {
-                    go.transform.SetParent(root, true);
-                    partObjects.Remove(u);
-                    Transform cnp;
-                    if (canopies.TryGetValue(u, out cnp)) { Destroy(cnp.gameObject); canopies.Remove(u); }
-                }
-            }
-            debrisRoots[d] = root;
+            var mb = new MeshBuilder();
+            mb.Lathe(new List<Vector2> { new Vector2(0f, 0f), new Vector2(1f, -0.4f), new Vector2(1.25f, -1.6f), new Vector2(1.1f, -3f) }, 24, 0);
+            var go = new GameObject("Plasma");
+            go.AddComponent<MeshFilter>().sharedMesh = mb.ToMesh("Plasma");
+            plasmaMat = MaterialLibrary.Custom("Flame");
+            plasmaMat.SetColor("_Color", new Color(1f, 0.45f, 0.25f));
+            plasmaMat.SetColor("_Core", new Color(1f, 0.85f, 0.7f));
+            var r = go.AddComponent<MeshRenderer>();
+            r.sharedMaterial = plasmaMat;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            plasma = go.transform;
+            go.SetActive(false);
         }
 
         public void Explode(Vector3 renderPos, float size)
         {
-            padAnchor.position = ToRender(new Vector2d(0, FlightVessel.R));
             var ep = new ParticleSystem.EmitParams();
-            ep.position = padAnchor.InverseTransformPoint(renderPos);
+            ep.position = smokeAnchor.InverseTransformPoint(renderPos);
             ep.applyShapeToPosition = true;
-            int n = Mathf.Clamp((int)(size * 8f), 20, 160);
-            blast.Emit(ep, n);
+            blast.Emit(ep, Mathf.Clamp((int)(size * 8f), 20, 160));
             StartCoroutine(Flash(renderPos, size));
         }
 
@@ -414,13 +414,15 @@ namespace Apogee.Flight
         {
             var mat = MaterialLibrary.Custom("Stars");
             mat.SetTexture("_MainTex", ProceduralTextures.Glow(128));
-            mat.SetFloat("_Brightness", 3f);
-            var go = MakeObject("Flash", PlanetFactory.Quad(), mat);
+            var go = new GameObject("Flash");
+            go.AddComponent<MeshFilter>().sharedMesh = PlanetFactory.Quad();
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
             var t = go.transform;
             for (float a = 0f; a < 1.2f; a += Time.deltaTime)
             {
                 float k = a / 1.2f;
-                t.position = pos + Vector3.back * 2f;
+                t.position = pos;
+                t.rotation = cam.transform.rotation;
                 t.localScale = Vector3.one * size * (2f + k * 6f);
                 mat.SetFloat("_Brightness", 3f * (1f - k) * (1f - k));
                 yield return null;
@@ -428,14 +430,91 @@ namespace Apogee.Flight
             Destroy(go);
         }
 
-        public void SetXRay(bool on)
+        Transform Canopy(int uid)
         {
-            xray = on;
-            foreach (var kv in partObjects) if (kv.Value != null) XRay.Apply(kv.Value, vessel.state.byUid[kv.Key], on);
+            Transform c;
+            if (canopies.TryGetValue(uid, out c)) return c;
+            if (canopyMesh == null)
+            {
+                var mb = new MeshBuilder();
+                var dome = new List<Vector2>();
+                for (int i = 0; i <= 10; i++)
+                {
+                    float t = i / 10f;
+                    dome.Add(new Vector2(Mathf.Cos(t * Mathf.PI * 0.5f), Mathf.Sin(t * Mathf.PI * 0.5f) * 0.55f));
+                }
+                dome[dome.Count - 1] = new Vector2(0f, 0.55f);
+                mb.Lathe(dome, 24, 0);
+                mb.Lathe(new List<Vector2> { new Vector2(0f, 0.53f), new Vector2(1f, -0.02f) }, 24, 0);
+                for (int i = 0; i < 8; i++)
+                {
+                    float a = i * 45f * Mathf.Deg2Rad;
+                    mb.Tube(new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)), new Vector3(0f, -1.6f, 0f), 0.006f, 4, 0);
+                }
+                canopyMesh = mb.ToMesh("Canopy");
+            }
+            var go = new GameObject("Canopy");
+            go.AddComponent<MeshFilter>().sharedMesh = canopyMesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = MaterialLibrary.Get("chute");
+            c = go.transform;
+            canopies[uid] = c;
+            return c;
         }
 
-        /// <summary>Animates folding legs / solar arrays, chute canopies and the inside-view fuel levels.</summary>
-        void UpdateParts()
+        // ------------------------------------------------------------------ per frame
+
+        public Vector3 SunDirection { get; private set; }
+
+        public void Render(float dt)
+        {
+            var v = vessel;
+            var b = v.body;
+            double t = v.time;
+            var bodyAbs = b.AbsolutePosition(t);
+            var vesselAbs = bodyAbs + v.pos;
+            var sunDir = (-vesselAbs).normalized.ToFloat();
+            SunDirection = sunDir;
+            sun.transform.rotation = Quaternion.LookRotation(-sunDir);
+            var up = v.Up.ToFloat();
+
+            // vessel at the origin (its centre of mass)
+            vesselRoot.rotation = v.rot;
+            vesselRoot.position = -(v.rot * v.comLocal);
+
+            UpdateParts(dt);
+            UpdateFlames(dt);
+            UpdateDebris();
+            UpdateCamera(dt, up);
+
+            // atmosphere colour and light
+            double alt = v.Altitude;
+            float day = Mathf.Clamp01(Vector3.Dot(up, sunDir) * 3f + 0.25f);
+            Color sky = Color.black;
+            float stars = 1f;
+            float haze = 0f;
+            if (b.HasAtmosphere && alt < b.atmosphere.height)
+            {
+                float thick = Mathf.Clamp01((float)(b.atmosphere.Pressure(alt) / b.atmosphere.p0));
+                float k = Mathf.Pow(thick, 0.35f);
+                sky = b.atmosphere.skyColor * k * day;
+                sky = Color.Lerp(sky, new Color(0.95f, 0.5f, 0.25f) * k, Mathf.Clamp01(1f - Mathf.Abs(Vector3.Dot(up, sunDir)) * 5f) * 0.4f * k);
+                stars = Mathf.Clamp01(1f - k * day * 3f);
+                haze = 0.000012f * thick;
+            }
+            sun.intensity = Mathf.Lerp(0.05f, 1.25f, Mathf.Clamp01(Vector3.Dot(up, sunDir) * 4f + 0.6f));
+            RenderSettings.ambientLight = Color.Lerp(new Color(0.05f, 0.05f, 0.07f), new Color(0.45f, 0.5f, 0.6f), day * (b.HasAtmosphere ? 1f : 0.25f));
+
+            // local ground and launch site
+            terrain.UpdatePatch(b, v.pos, t, sunDir, Color.Lerp(sky, Color.white, 0.25f), haze);
+            if (b == site.Body) site.Place(t, v.pos); else site.gameObject.SetActive(false);
+
+            // the Solar System behind it all
+            ViewerFrame = v.pos + (Vector3d)cam.transform.position;
+            space.Render(bodyAbs + ViewerFrame, cam.transform.rotation, cam.fieldOfView, t, 1e5, stars * 0.9f, sky, 0f);
+            space.HideAllLines();
+        }
+
+        void UpdateParts(float dt)
         {
             foreach (var kv in partObjects)
             {
@@ -444,40 +523,27 @@ namespace Apogee.Flight
                 if (go == null) continue;
                 var p = vessel.state.byUid[uid];
                 var d = p.Def;
-                float f;
-                if (foldAnim.TryGetValue(uid, out f))
+                LegRig rig;
+                if (legs.TryGetValue(uid, out rig))
+                {
+                    float target = vessel.folded.Contains(uid) ? 0f : 1f;
+                    rig.deploy = Mathf.MoveTowards(rig.deploy, target, dt * 0.45f);
+                    float load = vessel.status == FlightStatus.Landed ? 1f : vessel.status == FlightStatus.OnPad ? 0f : 0f;
+                    rig.compress = Mathf.MoveTowards(rig.compress, load, dt * 2f);
+                    rig.Apply();
+                }
+                float s;
+                if (solarAnim.TryGetValue(uid, out s))
                 {
                     float target = vessel.folded.Contains(uid) ? 1f : 0f;
-                    float nf = Mathf.MoveTowards(f, target, Time.deltaTime * 1.4f);
-                    if (nf != f || !foldApplied.Contains(uid))
-                    {
-                        foldApplied.Add(uid);
-                        foldAnim[uid] = nf;
-                        PartPose pose;
-                        vessel.poses.TryGetValue(uid, out pose);
-                        var dims = PartDims.Of(p);
-                        float e = nf * nf * (3f - 2f * nf);
-                        if (d.isLeg)
-                        {
-                            // Legs swing up about their hinge until they lie along the hull (like a booster's landing legs).
-                            var hinge = new Vector3(0.12f, dims.height * 0.3f, 0f);
-                            var q = Quaternion.Euler(0f, 0f, 140f * e);
-                            go.transform.localRotation = pose.rotation * q;
-                            go.transform.localPosition = pose.position + pose.rotation * (hinge - q * hinge);
-                        }
-                        else
-                        {
-                            // Solar arrays retract concertina-style towards their mount.
-                            go.transform.localPosition = pose.position;
-                            go.transform.localRotation = pose.rotation;
-                            go.transform.localScale = new Vector3(Mathf.Lerp(1f, 0.26f, e), Mathf.Lerp(1f, 0.85f, e), 1f);
-                        }
-                    }
+                    float ns = Mathf.MoveTowards(s, target, dt * 0.6f);
+                    solarAnim[uid] = ns;
+                    float e = ns * ns * (3f - 2f * ns);
+                    go.transform.localScale = new Vector3(Mathf.Lerp(1f, 0.22f, e), Mathf.Lerp(1f, 0.9f, e), 1f);
                 }
                 if (xray && d.fuelMass > 0f)
                 {
-                    float fuel;
-                    vessel.state.fuel.TryGetValue(uid, out fuel);
+                    float fuel; vessel.state.fuel.TryGetValue(uid, out fuel);
                     XRay.SetFuel(go, fuel / Mathf.Max(1e-5f, PartMass.Fuel(p)));
                 }
                 if (d.isParachute) UpdateCanopy(uid, go, d);
@@ -486,236 +552,211 @@ namespace Apogee.Flight
 
         void UpdateCanopy(int uid, GameObject part, PartDefinition d)
         {
-            bool show = vessel.chutesDeployed.Contains(uid) && vessel.chuteArmed && vessel.Altitude < 30000 && vessel.status != FlightStatus.Crashed;
-            Transform c;
-            if (!canopies.TryGetValue(uid, out c))
-            {
-                if (!show) return;
-                if (canopyMesh == null)
-                {
-                    var mb = new MeshBuilder();
-                    var dome = new List<Vector2>();
-                    for (int i = 0; i <= 10; i++)
-                    {
-                        float t = i / 10f;
-                        dome.Add(new Vector2(Mathf.Cos(t * Mathf.PI * 0.5f), Mathf.Sin(t * Mathf.PI * 0.5f) * 0.55f));
-                    }
-                    dome[dome.Count - 1] = new Vector2(0f, 0.55f);
-                    mb.Lathe(dome, 24, 0);
-                    mb.Lathe(new List<Vector2> { new Vector2(0f, 0.53f), new Vector2(1f, -0.02f) }, 24, 0); // underside
-                    for (int i = 0; i < 6; i++)
-                    {
-                        float a = i * 60f * Mathf.Deg2Rad;
-                        mb.Tube(new Vector3(Mathf.Cos(a), 0f, Mathf.Sin(a)), new Vector3(0f, -1.6f, 0f), 0.008f, 4, 0);
-                    }
-                    canopyMesh = mb.ToMesh("Canopy");
-                }
-                var go = new GameObject("Canopy");
-                go.AddComponent<MeshFilter>().sharedMesh = canopyMesh;
-                var r = go.AddComponent<MeshRenderer>();
-                r.sharedMaterial = MaterialLibrary.Get("chute");
-                c = go.transform;
-                canopies[uid] = c;
-            }
-            c.gameObject.SetActive(show && part.activeInHierarchy);
-            if (!show) return;
-            // Drogue first (small), then the main canopy as it inflates; it trails above the part, against the airflow.
-            float open = vessel.chuteOpen;
-            float radius = (1.4f + open * 8.6f) * Mathf.Sqrt(d.chuteScale);
-            var v = vessel.vel;
-            Vector3 trail = v.magnitude > 2 ? -new Vector3((float)v.x, (float)v.y, 0f).normalized : vesselRoot.up;
+            bool show = vessel.chutesDeployed.Contains(uid) && vessel.chuteArmed && vessel.InAtmosphere && vessel.status == FlightStatus.Flying;
+            if (!show) { Transform c0; if (canopies.TryGetValue(uid, out c0)) c0.gameObject.SetActive(false); return; }
+            var c = Canopy(uid);
+            c.gameObject.SetActive(true);
+            float radius = (1.4f + vessel.chuteOpen * 8.6f) * Mathf.Sqrt(d.chuteScale);
+            var air = vessel.airVelocity;
+            Vector3 trail = air.magnitude > 2 ? -air.normalized.ToFloat() : vessel.Up.ToFloat();
             c.position = part.transform.position + trail * radius * 1.6f;
             c.rotation = Quaternion.FromToRotation(Vector3.up, trail);
             c.localScale = Vector3.one * radius;
         }
 
-        public void HideVessel()
+        void UpdateFlames(float dt)
         {
-            foreach (var go in partObjects.Values) if (go != null) go.SetActive(false);
-        }
-
-        // ------------------------------------------------------------------ per frame
-
-        void UpdateVesselTransform()
-        {
-            var rot = RotationFor(vessel.angle);
-            vesselRoot.rotation = rot;
-            vesselRoot.position = ToRender(vessel.pos) + rot * new Vector3(-vessel.comLocal.x, -vessel.comLocal.y, 0f);
-        }
-
-        /// <summary>Lays out everything for this frame. viewSize is the visible height in metres.</summary>
-        public void Render(float viewSize, Vector3 camPos)
-        {
-            origin = vessel.pos;
-            UpdateVesselTransform();
-            UpdateParts();
+            var b = vessel.body;
             double alt = vessel.Altitude;
-            float pr = (float)EarthAtmosphere.PressureRatio(alt);
-
-            // Engines: plume length/width follow throttle and expand as air pressure falls.
+            float pr = b.HasAtmosphere ? Mathf.Clamp01((float)b.atmosphere.PressureAtm(System.Math.Max(0, alt))) : 0f;
             foreach (var f in flames)
             {
-                float target = 0f;
+                float target;
                 vessel.engineOutput.TryGetValue(f.uid, out target);
                 if (!partObjects.ContainsKey(f.uid)) target = 0f;
-                f.current = Mathf.MoveTowards(f.current, target, Time.deltaTime * 6f);
+                f.current = Mathf.MoveTowards(f.current, target, dt * 6f);
                 bool on = f.current > 0.01f;
                 if (f.t.gameObject.activeSelf != on) f.t.gameObject.SetActive(on);
                 if (!on) continue;
                 float vac = 1f - pr;
                 float width = f.exitDiameter * (0.95f + vac * 1.8f);
                 float length = f.exitDiameter * (2.2f + 4.5f * f.current) * (1f + vac * 2.2f);
-                Vector3 axis = -f.t.parent.up;
-                f.t.rotation = Quaternion.LookRotation(Vector3.forward, -axis);
                 var ls = f.t.parent.lossyScale;
-                f.t.localScale = new Vector3(width / Mathf.Max(0.001f, ls.x), length / Mathf.Max(0.001f, ls.y), 1f);
-                f.mat.SetFloat("_Intensity", (1.1f + f.current * 0.9f) * (0.6f + 0.4f * pr + vac * 0.2f));
+                f.t.localScale = new Vector3(width / Mathf.Max(0.001f, ls.x), length / Mathf.Max(0.001f, ls.y), width / Mathf.Max(0.001f, ls.z));
+                f.mat.SetFloat("_Intensity", (1.1f + f.current * 0.9f) * (0.6f + 0.4f * pr + vac * 0.2f) * (0.9f + 0.1f * Mathf.Sin(Time.time * 47f)));
                 f.mat.SetFloat("_Expansion", vac);
             }
+            // RCS: puffs on the nozzles that push in the commanded direction
+            var cmd = vessel.rcsInput;
+            bool rotating = vessel.rcsOn && (Mathf.Abs(vessel.pitchInput) + Mathf.Abs(vessel.yawInput) + Mathf.Abs(vessel.rollInput) > 0.05f);
+            foreach (var j in rcsJets)
+            {
+                bool on = false;
+                if (vessel.rcsOn && partObjects.ContainsKey(j.uid) && vessel.RcsFuelFraction() > 0f)
+                {
+                    // the nozzle pushes opposite to where its gas goes
+                    var gasDirVessel = Quaternion.Inverse(vessel.rot) * (j.t.rotation * Vector3.down);
+                    var push = -gasDirVessel;
+                    on = (vessel.rcsFiring && Vector3.Dot(push, cmd.normalized) > 0.5f) || (rotating && Random.value < 0.5f);
+                }
+                j.current = Mathf.MoveTowards(j.current, on ? 1f : 0f, dt * 18f);
+                bool vis = j.current > 0.02f;
+                if (j.t.gameObject.activeSelf != vis) j.t.gameObject.SetActive(vis);
+                if (!vis) continue;
+                float len = 0.9f * j.current * (0.8f + Random.value * 0.4f);
+                j.t.localScale = new Vector3(0.22f, len, 0.22f);
+                j.mat.SetFloat("_Intensity", 0.7f * j.current);
+                j.mat.SetFloat("_Expansion", 1f);
+            }
 
-            // Smoke from the lowest firing engine while in the lower atmosphere
-            padAnchor.position = ToRender(new Vector2d(0, FlightVessel.R));
-            padAnchor.rotation = Quaternion.identity;
+            // exhaust smoke near the ground / in thick air
             FlameFx lowest = null;
             float lowY = float.MaxValue;
+            var upv = vessel.Up.ToFloat();
             foreach (var f in flames)
             {
                 if (f.current < 0.05f) continue;
-                if (f.t.position.y < lowY) { lowY = f.t.position.y; lowest = f; }
+                float h = Vector3.Dot(f.t.position, upv);
+                if (h < lowY) { lowY = h; lowest = f; }
             }
             var em = smoke.emission;
-            if (lowest != null && alt < 18000)
+            if (lowest != null && pr > 0.05f && site.gameObject.activeSelf)
             {
                 smoke.transform.position = lowest.t.position;
                 smoke.transform.rotation = Quaternion.LookRotation(-lowest.t.parent.up);
-                float thrustSum = 0f;
-                foreach (var v in vessel.engineOutput.Values) thrustSum += v;
-                em.rateOverTime = Mathf.Clamp(45f * thrustSum, 0f, 160f) * Mathf.Clamp01(pr * 1.5f);
+                float sum = 0f;
+                foreach (var o in vessel.engineOutput.Values) sum += o;
+                em.rateOverTime = Mathf.Clamp(50f * sum, 0f, 180f) * Mathf.Clamp01(pr * 1.4f);
             }
             else em.rateOverTime = 0f;
 
-            // Debris
-            var dead = new List<Debris>();
+            // re-entry plasma around the leading end
+            bool hot = vessel.heatFlux > 4e4 && vessel.status == FlightStatus.Flying;
+            if (plasma.gameObject.activeSelf != hot) plasma.gameObject.SetActive(hot);
+            if (hot)
+            {
+                var air = vessel.airVelocity.normalized.ToFloat();
+                float r = vessel.maxRadius * 1.3f;
+                plasma.position = air * (vessel.length * 0.5f + r * 0.3f);
+                plasma.rotation = Quaternion.FromToRotation(Vector3.up, air);
+                plasma.localScale = new Vector3(r, r * (1f + Mathf.Clamp01((float)(vessel.heatFlux / 1e6))), r);
+                plasmaMat.SetFloat("_Intensity", Mathf.Clamp((float)(vessel.heatFlux / 3e5), 0.2f, 2.5f));
+            }
+        }
+
+        void UpdateDebris()
+        {
+            var gone = new List<Debris>();
             foreach (var kv in debrisRoots)
             {
                 var d = kv.Key;
-                if (d.dead)
+                if (d.dead || !vessel.debris.Contains(d) || d.body != vessel.body)
                 {
-                    if (d.impacted && (d.pos - vessel.pos).magnitude < 20000) Explode(ToRender(d.pos), 6f);
                     Destroy(kv.Value.gameObject);
-                    dead.Add(d);
+                    gone.Add(d);
                     continue;
                 }
-                var dp = ToRender(d.pos);
-                if (dp.sqrMagnitude > 1e10f) { kv.Value.gameObject.SetActive(false); continue; } // too far to see
-                kv.Value.gameObject.SetActive(true);
-                var rot = RotationFor(d.angle);
-                kv.Value.rotation = rot;
-                kv.Value.position = dp + rot * new Vector3(-d.comLocal.x, -d.comLocal.y, 0f);
-            }
-            foreach (var d in dead) debrisRoots.Remove(d);
-
-            BuildGround(viewSize);
-
-            // Launch complex
-            var padPos = ToRender(new Vector2d(0, FlightVessel.R));
-            bool padVisible = padPos.sqrMagnitude < 1.6e9f;
-            if (pad.gameObject.activeSelf != padVisible) pad.gameObject.SetActive(padVisible);
-            if (padVisible) pad.position = padPos;
-
-            // Clouds
-            for (int i = 0; i < clouds.Count; i++)
-            {
-                var p = ToRender(cloudPos[i]);
-                bool vis = p.sqrMagnitude < 4e10f && viewSize < 300000f;
-                if (clouds[i].gameObject.activeSelf != vis) clouds[i].gameObject.SetActive(vis);
+                var rel = (d.pos - vessel.pos);
+                bool vis = rel.magnitude < 150000;
+                if (kv.Value.gameObject.activeSelf != vis) kv.Value.gameObject.SetActive(vis);
                 if (!vis) continue;
-                p.z = 60f;
-                clouds[i].position = p;
-                double phi = System.Math.Atan2(cloudPos[i].y, cloudPos[i].x);
-                clouds[i].rotation = Quaternion.Euler(0f, 0f, (float)(phi * Mathf.Rad2Deg) - 90f);
+                kv.Value.rotation = d.rot;
+                kv.Value.position = rel.ToFloat() - d.rot * d.comLocal;
             }
-
-            // Sky colour: blue at the surface, black in space and when zoomed out to orbit scale
-            float k = Mathf.Clamp01((float)alt / 65000f);
-            k = Mathf.Max(k, Mathf.InverseLerp(40000f, 400000f, viewSize));
-            var skyLow = new Color(0.40f, 0.64f, 0.95f);
-            var skyMid = new Color(0.08f, 0.15f, 0.36f);
-            Color sky = k < 0.45f ? Color.Lerp(skyLow, skyMid, k / 0.45f) : Color.Lerp(skyMid, Color.black, (k - 0.45f) / 0.55f);
-            cam.backgroundColor = sky;
-            stars.position = camPos;
-            starMat.SetFloat("_Brightness", Mathf.Clamp01((k - 0.35f) / 0.4f) * 1.4f);
-            RenderSettings.ambientSkyColor = Color.Lerp(new Color(0.55f, 0.62f, 0.75f), new Color(0.12f, 0.13f, 0.16f), k);
+            foreach (var d in gone) debrisRoots.Remove(d);
         }
 
-        /// <summary>Builds the visible stretch of planet surface (and the glow of the atmosphere above it).</summary>
-        void BuildGround(float viewSize)
+        // ------------------------------------------------------------------ camera
+
+        public void SetLaunchCamera()
         {
-            double R = FlightVessel.R;
-            double phi0 = System.Math.Atan2(vessel.pos.y, vessel.pos.x);
-            double alt = vessel.Altitude;
-            double span = (viewSize * 2.2 + System.Math.Max(0, alt) * 1.2 + 2000) / R;
-            if (span > System.Math.PI) span = System.Math.PI;
-            double depth = System.Math.Min(R, viewSize * 3.0 + alt + 3000);
-            double innerR = R - depth;
-            double atmoTop = R + 90000;
+            camMode = CamMode.LaunchCam;
+            launchCamPos = Vector3.zero;
+        }
 
-            gv.Clear(); gc.Clear(); guv.Clear(); gt.Clear();
-            av.Clear(); ac.Clear(); at.Clear();
-            double tile = 18.0;
-            double u0 = phi0 * R / tile;
-            u0 -= System.Math.Floor(u0);
-            float detail = 1f - Mathf.InverseLerp(2500f, 40000f, viewSize);
-            groundMat.SetFloat("_Detail", detail);
-            float atmoAlpha = Mathf.InverseLerp(8000f, 60000f, viewSize) * 0.6f;
-            for (int i = 0; i <= Segments; i++)
+        void UpdateCamera(float dt, Vector3 up)
+        {
+            camDistance = Mathf.Lerp(camDistance, camDistanceGoal, 1f - Mathf.Exp(-dt * 6f));
+            var t = cam.transform;
+            switch (camMode)
             {
-                double phi = phi0 - span + 2 * span * i / Segments;
-                double c = System.Math.Cos(phi), s = System.Math.Sin(phi);
-                var surface = new Vector2d(c * R, s * R);
-                var inner = new Vector2d(c * innerR, s * innerR);
-                gv.Add(ToRender(surface));
-                gv.Add(ToRender(inner));
-                double arc = (phi - System.Math.PI / 2) * R;
-                Color col = System.Math.Abs(arc) < 260 ? new Color(0.55f, 0.55f, 0.53f) : band.Sample(phi);
-                gc.Add(col);
-                gc.Add(Color.Lerp(col, new Color(0.18f, 0.14f, 0.1f), 0.6f));
-                float u = (float)((phi - phi0) * R / tile + u0);
-                guv.Add(new Vector2(u, 0f));
-                guv.Add(new Vector2(u, (float)(depth / tile)));
-
-                av.Add(ToRender(surface));
-                av.Add(ToRender(new Vector2d(c * atmoTop, s * atmoTop)));
-                ac.Add(new Color(0.45f, 0.65f, 1f, atmoAlpha));
-                ac.Add(new Color(0.2f, 0.35f, 0.9f, 0f));
-                if (i < Segments)
+                case CamMode.LaunchCam:
                 {
-                    int b = i * 2;
-                    gt.Add(b); gt.Add(b + 2); gt.Add(b + 1);
-                    gt.Add(b + 1); gt.Add(b + 2); gt.Add(b + 3);
-                    at.Add(b); at.Add(b + 1); at.Add(b + 2);
-                    at.Add(b + 1); at.Add(b + 3); at.Add(b + 2);
+                    // ground camera beside the pad, tracking the rocket as it climbs away
+                    if (site.gameObject.activeSelf)
+                    {
+                        var p = site.transform.TransformPoint(new Vector3(140f, 4f, -170f));
+                        t.position = p;
+                        var target = Vector3.zero;
+                        t.rotation = Quaternion.LookRotation(target - p, up);
+                        cam.fieldOfView = Mathf.Clamp(Mathf.Rad2Deg * 2f * Mathf.Atan((vessel.length * 1.6f + 20f) / Mathf.Max(1f, p.magnitude)), 4f, 60f);
+                        if (p.magnitude > 9000f) camMode = CamMode.Chase;
+                        break;
+                    }
+                    camMode = CamMode.Chase;
+                    goto case CamMode.Chase;
+                }
+                case CamMode.Chase:
+                case CamMode.Free:
+                {
+                    cam.fieldOfView = 55f;
+                    // chase: horizon-level (up = local vertical); free: locked to the rocket's own axes
+                    Quaternion frame = camMode == CamMode.Chase
+                        ? Quaternion.LookRotation(Vector3.ProjectOnPlane(vessel.rot * Vector3.forward, up).sqrMagnitude > 1e-4f ? Vector3.ProjectOnPlane(vessel.rot * Vector3.forward, up).normalized : Vector3.ProjectOnPlane(Vector3.forward, up).normalized, up)
+                        : vessel.rot;
+                    if (camMode == CamMode.Chase) frame = HorizonFrame(up);
+                    var q = frame * Quaternion.Euler(camPitch, camYaw, 0f);
+                    float dist = Mathf.Max(camDistance, vessel.length * 0.8f + 4f);
+                    t.position = q * new Vector3(0f, 0f, -dist);
+                    t.rotation = Quaternion.LookRotation(-t.position.normalized, frame * Vector3.up);
+                    break;
+                }
+                case CamMode.Cockpit:
+                {
+                    cam.fieldOfView = 70f;
+                    var ctl = CommandPart();
+                    if (ctl == null) { camMode = CamMode.Chase; break; }
+                    var dims = PartDims.Of(vessel.state.byUid[vessel.state.controlUid]);
+                    // pilot's eye: inside the capsule, looking out of the forward window
+                    t.position = ctl.position + ctl.rotation * new Vector3(0f, dims.height * 0.12f, dims.Radius * 0.35f);
+                    t.rotation = vessel.rot * Quaternion.Euler(headPitch, headYaw, 0f);
+                    break;
                 }
             }
-            groundMesh.Clear();
-            groundMesh.SetVertices(gv);
-            groundMesh.SetColors(gc);
-            groundMesh.SetUVs(0, guv);
-            groundMesh.SetTriangles(gt, 0);
-            groundMesh.RecalculateBounds();
-            atmoMesh.Clear();
-            atmoMesh.SetVertices(av);
-            atmoMesh.SetColors(ac);
-            atmoMesh.SetTriangles(at, 0);
-            atmoMesh.RecalculateBounds();
-            atmo.gameObject.SetActive(atmoAlpha > 0.01f);
-            ground.position = Vector3.zero;
-            atmo.position = new Vector3(0f, 0f, 200f);
         }
 
-        public bool LandedInOcean()
+        Quaternion horizonFrame = Quaternion.identity;
+        bool horizonInit;
+
+        /// <summary>A frame whose up is the local vertical and whose heading changes smoothly.</summary>
+        Quaternion HorizonFrame(Vector3 up)
         {
-            return band.IsOcean(System.Math.Atan2(vessel.pos.y, vessel.pos.x));
+            if (!horizonInit) { horizonFrame = Quaternion.LookRotation(Vector3.ProjectOnPlane(Vector3.forward, up).normalized, up); horizonInit = true; }
+            var f = Vector3.ProjectOnPlane(horizonFrame * Vector3.forward, up);
+            if (f.sqrMagnitude < 1e-6f) f = Vector3.ProjectOnPlane(horizonFrame * Vector3.up, up);
+            horizonFrame = Quaternion.LookRotation(f.normalized, up);
+            return horizonFrame;
+        }
+
+        Transform CommandPart()
+        {
+            GameObject go;
+            return partObjects.TryGetValue(vessel.state.controlUid, out go) && go != null ? go.transform : null;
+        }
+
+        public bool HasCockpit
+        {
+            get
+            {
+                PartInstance p;
+                return vessel.state.byUid.TryGetValue(vessel.state.controlUid, out p) && vessel.state.alive.Contains(p.uid) && p.Def.crew > 0;
+            }
+        }
+
+        public void HideVessel()
+        {
+            if (vesselRoot != null) vesselRoot.gameObject.SetActive(false);
+            plasma.gameObject.SetActive(false);
         }
     }
 }

@@ -10,6 +10,24 @@ the project, mobile rendering setup, main menu and a working modular rocket buil
 
 ---
 
+## Phase 4 — real 3D Solar System
+
+- **Real-scale Solar System in 3D:** the Sun, all 8 planets and the Moon, Phobos, Deimos, Io, Europa, Ganymede, Callisto and Titan on real orbits (J2000 elements; game starts 8 Nov 2026). Real radii, gravity, rotation and atmospheres (Earth, Venus, Mars, Titan, the gas giants).
+- **Real Earth:** NASA-based planet maps (Solar System Scope, CC BY 4.0) with clouds, ocean glint, night lights and an atmosphere glow; detailed local terrain when near the ground.
+- **3D flight physics:** every engine pushes from where it's mounted (off-centre engines twist the rocket), pitch/yaw/roll with reaction wheels, gimbals, RCS and fins, aerodynamic drag with centre of pressure, SAS (stability, prograde, retrograde, radial, normal, target), patched-conic sphere-of-influence changes, time warp up to 1,000,000× on rails.
+- **Damage:** re-entry heating per part (heat shields protect what's behind them; parts melt above their limit), structural joints that break under load, and g-limits (a huge engine on a tiny tank crushes it).
+- **Navigation:** 3D map with predicted trajectory, Moon/planet encounters with their periapsis, Ap/Pe markers, targets, and transfer advice (burn Δv, phase angle, and when to burn).
+- **Launch:** crawler rollout from the assembly building to the pad, rocket set on the hold-down clamps, countdown with ignition at T−3, swing arm retracts, pad camera tracks the climb.
+- **Cameras:** chase (horizon-level), free orbit, cockpit (look around from the pilot's seat), inside x-ray view. Drag to rotate, pinch to zoom.
+- **Landing legs** swing down, telescope out and compress on touchdown; tap to retract. **RCS** jets puff from the nozzles; 6-way translation pad.
+- **Builder:** Mirror mode, Logo Panels with your own text, and new parts — Condor-M methalox, Hydra-V hydrolox, Spark kick motor, linear aerospike, nuclear thermal, small solid; 5 m and 10 m tanks, spherical lander tank, monopropellant tank; 2.5→3.75→5 m adapters; I-beams, strut nodes; omni antenna, high-gain and relay dishes, RTG, large solar wing; floodlight, ladder, launch escape tower, crew cabin.
+
+Not yet: rovers and astronauts leaving the craft, driving on wheels, docking two craft together, aerodynamic control surfaces, and power/communication limits (antennas and batteries don't constrain you yet).
+
+## Credits
+
+Planet maps: [Solar System Scope](https://www.solarsystemscope.com/textures/), CC BY 4.0, based on NASA imagery.
+
 ## Phase 3A — building and flight controls
 
 - **Side attachment:** tanks, engines, boosters and girders snap to the side of other tanks (drop them beside a tank; symmetry ×2–×8). Side tanks crossfeed into the core. For boosters you want to drop, use a Radial Separator.

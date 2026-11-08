@@ -426,6 +426,186 @@ namespace Apogee.Parts
                 radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
             });
 
+            // ---------------- More engines ----------------
+            Add(new PartDefinition
+            {
+                id = "eng_condor", displayName = "Condor-M Methalox Engine",
+                description = "Full-flow staged-combustion methalox engine: very high thrust from a compact 1.3 m package.",
+                category = PartCategory.Engines, shape = PartShape.Engine, finish = Finish.Stainless,
+                diameter = 1.3f, topDiameter = 1.3f, height = 3.1f, dryMass = 1.6f,
+                thrustSL = 2260f, thrustVac = 2530f, ispSL = 327f, ispVac = 350f, gimbalRange = 15f, minThrottle = 0.4f
+            });
+            Add(new PartDefinition
+            {
+                id = "eng_hydra", displayName = "Hydra-V Hydrolox Vacuum Engine",
+                description = "Liquid-hydrogen upper-stage engine with an extendable bell. 465 s Isp — the most efficient chemical engine.",
+                category = PartCategory.Engines, shape = PartShape.VacuumEngine, finish = Finish.DarkComposite,
+                diameter = 1.25f, topDiameter = 1.25f, height = 3.4f, dryMass = 0.3f,
+                thrustSL = 40f, thrustVac = 110f, ispSL = 180f, ispVac = 465f, gimbalRange = 4f, minThrottle = 0.2f
+            });
+            Add(new PartDefinition
+            {
+                id = "eng_spark", displayName = "Spark Kick Engine",
+                description = "Tiny pressure-fed engine for probes, landers and kick stages.",
+                category = PartCategory.Engines, shape = PartShape.VacuumEngine, finish = Finish.DarkComposite,
+                diameter = 0.625f, topDiameter = 0.625f, height = 0.9f, dryMass = 0.13f,
+                thrustSL = 18f, thrustVac = 45f, ispSL = 190f, ispVac = 320f, gimbalRange = 5f, minThrottle = 0.1f
+            });
+            Add(new PartDefinition
+            {
+                id = "eng_aerospike", displayName = "Linear Aerospike Engine",
+                description = "Altitude-compensating nozzle: nearly the same efficiency from sea level to vacuum.",
+                category = PartCategory.Engines, shape = PartShape.Aerospike, finish = Finish.DarkComposite,
+                diameter = 2.5f, topDiameter = 2.5f, height = 1.6f, dryMass = 1.9f,
+                thrustSL = 820f, thrustVac = 900f, ispSL = 320f, ispVac = 350f, gimbalRange = 0f, minThrottle = 0.3f
+            });
+            Add(new PartDefinition
+            {
+                id = "eng_nuclear", displayName = "Atom-N Nuclear Thermal Engine",
+                description = "Reactor-heated hydrogen: 850 s Isp in vacuum, but heavy and weak at sea level. For interplanetary stages.",
+                category = PartCategory.Engines, shape = PartShape.VacuumEngine, finish = Finish.BlackWhite,
+                diameter = 1.25f, topDiameter = 1.25f, height = 4.2f, dryMass = 3.0f,
+                thrustSL = 14f, thrustVac = 60f, ispSL = 185f, ispVac = 850f, gimbalRange = 2f, minThrottle = 0.2f
+            });
+            Add(new PartDefinition
+            {
+                id = "srb_mini", displayName = "Sep-Motor Small Solid",
+                description = "Small solid motor for separation, ullage or light boosters.",
+                category = PartCategory.Engines, shape = PartShape.SolidBooster, finish = Finish.WhitePaint,
+                diameter = 0.625f, topDiameter = 0.625f, height = 2.2f, dryMass = 0.15f, fuelMass = 0.6f, solidFuel = true,
+                thrustSL = 150f, thrustVac = 165f, ispSL = 220f, ispVac = 240f, acceptsRadial = true
+            });
+
+            // ---------------- More tanks ----------------
+            Tank("tank_5", "ST-10 Super Heavy Tank", 5.0f, 10.0f, Finish.Stainless, "5 m stainless super-heavy tank.");
+            Tank("tank_25_xl", "HT-10 Extra Long Core Tank", 2.5f, 10.0f, Finish.WhitePaint, "10 m-long 2.5 m core tank.");
+            Add(new PartDefinition
+            {
+                id = "tank_sphere", displayName = "Spherical Lander Tank",
+                description = "Spherical propellant tank: the lightest shape for its volume. Classic lander design.",
+                category = PartCategory.Tanks, shape = PartShape.SphereTank, finish = Finish.GoldFoil,
+                diameter = 1.25f, topDiameter = 1.25f, height = 1.25f, dryMass = 0.12f, fuelMass = 1.0f, acceptsRadial = true
+            });
+            Add(new PartDefinition
+            {
+                id = "tank_mono", displayName = "Monopropellant Tank",
+                description = "Hydrazine for the RCS thrusters. RCS blocks anywhere on the craft draw from it.",
+                category = PartCategory.Tanks, shape = PartShape.SphereTank, finish = Finish.WhitePaint,
+                diameter = 0.9f, topDiameter = 0.9f, height = 0.9f, dryMass = 0.08f, fuelMass = 0.4f, monoprop = true, acceptsRadial = true
+            });
+            Add(new PartDefinition
+            {
+                id = "adapter_25_375", displayName = "Adapter 2.5 → 3.75 m",
+                description = "Conical adapter between 2.5 m and 3.75 m stacks.",
+                category = PartCategory.Structural, shape = PartShape.Adapter,
+                diameter = 3.75f, topDiameter = 2.5f, height = 1.4f, dryMass = 0.3f, acceptsRadial = true
+            });
+            Add(new PartDefinition
+            {
+                id = "adapter_375_5", displayName = "Adapter 3.75 → 5 m",
+                description = "Conical adapter between 3.75 m and 5 m stacks.",
+                category = PartCategory.Structural, shape = PartShape.Adapter,
+                diameter = 5f, topDiameter = 3.75f, height = 1.8f, dryMass = 0.5f, acceptsRadial = true
+            });
+
+            // ---------------- Structure ----------------
+            Add(new PartDefinition
+            {
+                id = "ibeam", displayName = "Steel I-Beam",
+                description = "Heavy I-beam for frames, outriggers and landing struts. Attach to sides or stack.",
+                category = PartCategory.Structural, shape = PartShape.IBeam, finish = Finish.DarkComposite,
+                diameter = 0.5f, topDiameter = 0.5f, height = 3.0f, dryMass = 0.3f, resizableLength = true, acceptsRadial = true
+            });
+            Add(new PartDefinition
+            {
+                id = "strut_cube", displayName = "Octagonal Strut Node",
+                description = "Small octagonal connector for building trusses.",
+                category = PartCategory.Structural, shape = PartShape.Girder, finish = Finish.DarkComposite,
+                diameter = 0.4f, topDiameter = 0.4f, height = 0.4f, dryMass = 0.02f, acceptsRadial = true
+            });
+
+            // ---------------- Communication & power ----------------
+            Add(new PartDefinition
+            {
+                id = "antenna_omni", displayName = "Omni Antenna",
+                description = "Whip antenna for links with mission control while in Earth orbit.",
+                category = PartCategory.Utility, shape = PartShape.Antenna,
+                diameter = 0.15f, topDiameter = 0.15f, height = 1.0f, dryMass = 0.01f, antennaRangeKm = 5000f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "dish_hga", displayName = "High-Gain Dish",
+                description = "Steerable high-gain dish: Moon and Mars links.",
+                category = PartCategory.Utility, shape = PartShape.Dish,
+                diameter = 1.2f, topDiameter = 1.2f, height = 0.9f, dryMass = 0.06f, antennaRangeKm = 4e8f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "dish_relay", displayName = "Deep-Space Relay Dish",
+                description = "Large relay dish for the outer planets.",
+                category = PartCategory.Utility, shape = PartShape.Dish,
+                diameter = 3.0f, topDiameter = 3.0f, height = 1.6f, dryMass = 0.25f, antennaRangeKm = 5e9f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "rtg", displayName = "Radioisotope Generator",
+                description = "RTG: steady power for decades, day or night, far from the Sun.",
+                category = PartCategory.Utility, shape = PartShape.Rtg,
+                diameter = 0.6f, topDiameter = 0.6f, height = 1.1f, dryMass = 0.08f, solarKW = 0f, batteryKWh = 0.3f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "solar_large", displayName = "Large Solar Wing",
+                description = "Big roll-out array, 4 kW. Fold it before re-entry — tap it in flight.",
+                category = PartCategory.Utility, shape = PartShape.SolarPanel,
+                diameter = 0.3f, topDiameter = 0.3f, height = 3.0f, dryMass = 0.12f, solarKW = 4f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+
+            // ---------------- Utility ----------------
+            Add(new PartDefinition
+            {
+                id = "light_spot", displayName = "Floodlight",
+                description = "Spotlight for night landings and docking.",
+                category = PartCategory.Utility, shape = PartShape.Light,
+                diameter = 0.3f, topDiameter = 0.3f, height = 0.3f, dryMass = 0.01f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "ladder", displayName = "Crew Ladder",
+                description = "Ladder from the hatch down to the surface.",
+                category = PartCategory.Utility, shape = PartShape.Ladder,
+                diameter = 0.4f, topDiameter = 0.4f, height = 2.5f, dryMass = 0.02f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+            Add(new PartDefinition
+            {
+                id = "les_tower", displayName = "Launch Escape Tower",
+                description = "Abort tower that sits on the capsule's nose; jettison it with a decoupler once clear of the atmosphere.",
+                category = PartCategory.Command, shape = PartShape.EscapeTower, finish = Finish.WhitePaint,
+                diameter = 0.6f, topDiameter = 0.2f, height = 5f, dryMass = 0.9f, hasTopNode = false, dragCoefficient = 0.35f
+            });
+            Add(new PartDefinition
+            {
+                id = "crew_cabin", displayName = "Crew Cabin",
+                description = "Habitat module for 4 more astronauts on long missions.",
+                category = PartCategory.Command, shape = PartShape.CrewCabin, finish = Finish.WhitePaint,
+                diameter = 2.5f, topDiameter = 2.5f, height = 2.6f, dryMass = 2.2f, acceptsRadial = true
+            });
+            Add(new PartDefinition
+            {
+                id = "logo_panel", displayName = "Logo Panel",
+                description = "Your logo or name on the hull. Select it and tap 'Logo' to type the text; Paint sets the colour.",
+                category = PartCategory.Aero, shape = PartShape.Decal, isDecal = true,
+                diameter = 1.6f, topDiameter = 1.6f, height = 0.8f, dryMass = 0.005f,
+                radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
+            });
+
             // ---------------- Science ----------------
             Add(new PartDefinition
             {

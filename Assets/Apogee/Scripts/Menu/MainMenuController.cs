@@ -118,7 +118,7 @@ namespace Apogee.Menu
             glare.transform.SetParent(stars, true);
 
             // Earth
-            var sphere = PartMeshFactory.UVSphere(96, 192, 1f);
+            var sphere = Apogee.Flight.SpaceView.Sphere();
             earthMat = MaterialLibrary.Custom("Planet");
             earthMat.SetVector("_SunDir", sunDir);
             var earthGo = MakeObject("Earth", sphere, earthMat);
@@ -142,7 +142,7 @@ namespace Apogee.Menu
             moonMat.SetFloat("_Specular", 0f);
             moonMat.SetFloat("_NightLights", 0f);
             moonMat.SetFloat("_Ambient", 0.01f);
-            moon = MakeObject("Moon", PartMeshFactory.UVSphere(32, 64, 1f), moonMat).transform;
+            moon = MakeObject("Moon", Apogee.Flight.SpaceView.Sphere(), moonMat).transform;
             moon.position = new Vector3(-340f, 150f, 900f);
             moon.localScale = Vector3.one * 16f;
             moon.gameObject.SetActive(false);
@@ -186,10 +186,13 @@ namespace Apogee.Menu
 
         IEnumerator LoadEarth()
         {
-            int size = AppRoot.Instance.Settings.PlanetTextureSize;
-            status.text = "Generating Earth surface (" + size + "×" + size / 2 + ")…  first launch only";
-            Texture2D albedo = null, cloudTex = null;
-            yield return PlanetFactory.BuildEarth(size, (a, c) => { albedo = a; cloudTex = c; });
+            // Real Earth: Solar System Scope maps (CC BY 4.0), based on NASA imagery
+            Texture2D albedo = Apogee.Flight.SpaceView.Tex("earth"), cloudTex = Apogee.Flight.SpaceView.Tex("earth_clouds");
+            if (albedo == null)
+            {
+                int size = AppRoot.Instance.Settings.PlanetTextureSize;
+                yield return PlanetFactory.BuildEarth(size, (a, c) => { albedo = a; cloudTex = c; });
+            }
             if (albedo != null)
             {
                 earthMat.SetTexture("_MainTex", albedo);
@@ -197,7 +200,8 @@ namespace Apogee.Menu
                 earth.gameObject.SetActive(true);
             }
             yield return null;
-            moonMat.SetTexture("_MainTex", PlanetFactory.BuildMoon(512));
+            var moonTex = Apogee.Flight.SpaceView.Tex("moon");
+            moonMat.SetTexture("_MainTex", moonTex != null ? moonTex : PlanetFactory.BuildMoon(512));
             moon.gameObject.SetActive(true);
             status.text = "";
 
@@ -327,7 +331,7 @@ namespace Apogee.Menu
             if (portrait) status.alignment = TextAnchor.LowerCenter;
             UIFactory.Place(status.rectTransform, portrait ? new Vector2(0.5f, 0) : new Vector2(1, 0), portrait ? new Vector2(0.5f, 0) : new Vector2(1, 0),
                 portrait ? new Vector2(0, 52) : new Vector2(-30, 24), new Vector2(portrait ? 1000 : 900, 40));
-            var ver = UIFactory.Label(root, "Phase 3 build  ·  v" + Application.version, 18, Theme.Muted, TextAnchor.LowerLeft);
+            var ver = UIFactory.Label(root, "Phase 4 build  ·  v" + Application.version, 18, Theme.Muted, TextAnchor.LowerLeft);
             UIFactory.Place(ver.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(30, 24), new Vector2(600, 36));
         }
 

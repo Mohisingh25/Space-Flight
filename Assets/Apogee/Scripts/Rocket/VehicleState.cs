@@ -141,7 +141,7 @@ namespace Apogee.Rocket
         public bool IsLiquid(int uid)
         {
             var d = byUid[uid].Def;
-            return !d.solidFuel && !d.isRcs;
+            return !d.solidFuel && !d.isRcs && !d.monoprop;
         }
 
         public List<int> ActiveEngines(Dictionary<int, int> groups)
