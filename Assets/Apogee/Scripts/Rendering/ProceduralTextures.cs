@@ -32,6 +32,7 @@ namespace Apogee.Rendering
                 case "wall": t = Wall(256); break;
                 case "grating": t = Grating(128); break;
                 case "soil": t = Soil(256); break;
+                case "cloud": t = CloudPuff(128); break;
                 default: t = Solid(Color.white); break;
             }
             t.name = "Apogee_" + key;
@@ -268,6 +269,25 @@ namespace Apogee.Rendering
                     px[y * s + x] = Gray(val);
                 }
             return Make(s, s, px);
+        }
+
+        /// <summary>Soft cumulus puff: lumpy fbm edge, brighter core; R = light, A = density.</summary>
+        static Texture2D CloudPuff(int s)
+        {
+            var px = new Color32[s * s];
+            for (int y = 0; y < s; y++)
+                for (int x = 0; x < s; x++)
+                {
+                    float u = (float)x / s, v = (float)y / s;
+                    float dx = u - 0.5f, dy = v - 0.5f;
+                    float r = Mathf.Sqrt(dx * dx + dy * dy) * 2f;
+                    float n = Tile(u, v, 3f, 5, 7f);
+                    float edge = Mathf.Clamp01(1f - r + (n - 0.5f) * 0.9f);
+                    float a = Mathf.SmoothStep(0f, 1f, edge * 1.6f) * 0.9f;
+                    float light = Mathf.Clamp01(0.75f + (n - 0.5f) * 0.6f + dy * 0.4f);
+                    px[y * s + x] = new Color32((byte)(light * 255), (byte)(light * 255), (byte)(light * 255), (byte)(a * 255));
+                }
+            return Make(s, s, px, false);
         }
 
         static Texture2D Grating(int s)

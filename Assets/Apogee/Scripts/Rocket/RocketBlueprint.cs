@@ -29,7 +29,8 @@ namespace Apogee.Rocket
         public int sizeStep = -1;   // index into PartCatalog.DiameterSteps, -1 = default size
         public int lengthStep = -1; // index into PartCatalog.LengthSteps, -1 = 1x
         public int symmetryGroup;   // parts placed together in symmetry share a non-zero id
-        public string label = "";   // logo text for logo panels
+        public string label = "";
+        public float taperBottom, taperTop; // auto-shaped tank ends (diameter, 0 = straight) — set by RocketAssembly.AutoTaper   // logo text for logo panels
         public float payloadMass;   // t, for payload containers / cargo modules
         public int stage = -1;      // activation stage (0 = launch) for staged parts
         public int paint = -1;      // index into PaintPalette, -1 = the part's factory finish
@@ -132,6 +133,11 @@ namespace Apogee.Rocket
         public float height;
         public float diameterScale;
         public float lengthScale;
+        public float bottomEnd, topEnd;   // diameters at the very ends (tapered tanks), otherwise = diameter / topDiameter
+        public bool Tapered { get { return Mathf.Abs(bottomEnd - diameter) > 0.01f || Mathf.Abs(topEnd - topDiameter) > 0.01f; } }
+
+        /// <summary>Length of a tapered (conical) end section.</summary>
+        public static float TaperLength(float full, float end, float h) { return Mathf.Min(h * 0.45f, Mathf.Abs(full - end) * 0.9f + 0.15f); }
 
         public float Radius { get { return diameter * 0.5f; } }
         public float TopRadius { get { return topDiameter * 0.5f; } }
@@ -151,6 +157,8 @@ namespace Apogee.Rocket
             d.diameter = def.diameter * ds;
             d.topDiameter = def.topDiameter * ds;
             d.height = def.height * ls * (def.scaleHeightWithDiameter ? ds : 1f);
+            d.bottomEnd = p.taperBottom > 0.05f ? p.taperBottom : d.diameter;
+            d.topEnd = p.taperTop > 0.05f ? p.taperTop : d.topDiameter;
             return d;
         }
 
@@ -167,7 +175,20 @@ namespace Apogee.Rocket
         public static float VolumeScale(PartInstance p)
         {
             var d = PartDims.Of(p);
-            return d.diameterScale * d.diameterScale * d.lengthScale;
+            float v = d.diameterScale * d.diameterScale * d.lengthScale;
+            if (d.Tapered && d.height > 0.01f)
+            {
+                // a conical end holds less propellant than a cylinder of the same length
+                float lost = 0f, R = d.diameter;
+                foreach (var e in new[] { d.bottomEnd, d.topEnd })
+                {
+                    if (Mathf.Abs(e - R) < 0.01f) continue;
+                    float L = PartDims.TaperLength(R, e, d.height), k = e / R;
+                    lost += L / d.height * (1f - (1f + k + k * k) / 3f);
+                }
+                v *= Mathf.Clamp(1f - lost, 0.2f, 1f);
+            }
+            return v;
         }
 
         public static float Dry(PartInstance p)

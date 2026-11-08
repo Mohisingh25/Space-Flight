@@ -97,6 +97,17 @@ namespace Apogee.Rendering
                 case "seat": return S(0.25f, 0.27f, 0.3f, 0.2f, 0.4f);
                 case "suit": return S(0.95f, 0.95f, 0.95f, 0f, 0.35f);
                 // environment
+                case "grass": return S(0.30f, 0.42f, 0.18f, 0f, 0.08f, "soil", 0.08f, 0.08f);
+                case "asphalt": return S(0.17f, 0.17f, 0.18f, 0f, 0.2f, "soil", 0.12f, 0.12f);
+                case "gravel": return S(0.55f, 0.52f, 0.47f, 0f, 0.1f, "soil", 0.2f, 0.2f);
+                case "foliage": return S(0.16f, 0.32f, 0.12f, 0f, 0.15f);
+                case "palm": return S(0.22f, 0.38f, 0.14f, 0f, 0.2f);
+                case "bark": return S(0.36f, 0.27f, 0.18f, 0f, 0.1f);
+                case "building": return S(0.82f, 0.82f, 0.8f, 0f, 0.3f, "wall", 0.05f, 0.05f);
+                case "window_band": return S(0.18f, 0.25f, 0.32f, 0.6f, 0.85f);
+                case "tank_white": return S(0.92f, 0.92f, 0.9f, 0.1f, 0.55f);
+                case "water": return S(0.15f, 0.28f, 0.35f, 0.2f, 0.95f);
+                case "tread": return S(0.22f, 0.22f, 0.22f, 0.7f, 0.35f);
                 case "concrete": return S(1f, 1f, 1f, 0f, 0.25f, "concrete", 0.05f, 0.05f); // box UVs are in metres: one tile per 20 m
                 case "wall": return S(0.52f, 0.55f, 0.58f, 0.3f, 0.35f, "wall", 10f, 4f);
                 case "tower_steel": return S(0.62f, 0.15f, 0.10f, 0.4f, 0.4f);

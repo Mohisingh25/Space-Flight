@@ -75,7 +75,7 @@ namespace Apogee.Rocket
         public Dictionary<int, int> FuelGroups()
         {
             var group = new Dictionary<int, int>();
-            var adj = StagingSystem.Adjacency(bp, alive);
+            var adj = StackAdjacency();
             int next = 0;
             foreach (int start in alive)
             {
@@ -97,6 +97,55 @@ namespace Apogee.Rocket
                 }
             }
             return group;
+        }
+
+        /// <summary>
+        /// Propellant only flows through stacked (top/bottom) joints. Tanks glued to the side of another tank,
+        /// or hung on radial decouplers, are separate fuel systems feeding only the engines mounted on them.
+        /// Radial gear (legs, fins…) still belongs to its parent's system.
+        /// </summary>
+        public Dictionary<int, List<int>> StackAdjacency()
+        {
+            var adj = new Dictionary<int, List<int>>();
+            foreach (int u in alive) adj[u] = new List<int>();
+            foreach (int u in alive)
+            {
+                var p = byUid[u];
+                if (p.parentUid < 0 || !alive.Contains(p.parentUid)) continue;
+                if (p.mode == AttachMode.Flank || p.mode == AttachMode.Side) continue;
+                adj[u].Add(p.parentUid);
+                adj[p.parentUid].Add(u);
+            }
+            return adj;
+        }
+
+        /// <summary>
+        /// Engine burn: drains the tank closest to the engine first (counting joints), then the next one up,
+        /// so each tank empties in turn instead of all of them at once.
+        /// </summary>
+        public void DrainFrom(int engineUid, float amount, Dictionary<int, int> groups)
+        {
+            if (amount <= 0f) return;
+            if (byUid[engineUid].Def.solidFuel) { Drain(-(engineUid + 1), amount, groups); return; }
+            int key = groups[engineUid];
+            var adj = StackAdjacency();
+            var seen = new HashSet<int> { engineUid };
+            var q = new Queue<int>();
+            q.Enqueue(engineUid);
+            while (q.Count > 0 && amount > 1e-7f)
+            {
+                int u = q.Dequeue();
+                float f;
+                if (u != engineUid && IsLiquid(u) && fuel.TryGetValue(u, out f) && f > 0f && groups[u] == key)
+                {
+                    float take = Mathf.Min(f, amount);
+                    fuel[u] = f - take;
+                    amount -= take;
+                }
+                foreach (int v in adj[u])
+                    if (seen.Add(v) && !byUid[v].Def.isDecoupler) q.Enqueue(v);
+            }
+            if (amount > 1e-6f) Drain(key, amount, groups);   // anything left (e.g. odd layouts): pool-wide
         }
 
         /// <summary>Key of the propellant pool an engine draws from (solids use their own casing).</summary>

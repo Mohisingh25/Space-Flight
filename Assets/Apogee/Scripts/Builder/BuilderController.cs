@@ -1028,6 +1028,7 @@ namespace Apogee.Builder
         void Refresh(bool rebuildView = true, bool notify = true)
         {
             poses = RocketLayout.Compute(Bp);
+            RocketAssembly.AutoTaper(Bp);
             if (rebuildView) view.Rebuild(Bp);
             Stats = RocketAnalyzer.Analyze(Bp);
             view.ShowMarkers(Stats, settings.showBalanceMarkers);

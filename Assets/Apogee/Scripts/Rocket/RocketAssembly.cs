@@ -157,6 +157,27 @@ namespace Apogee.Rocket
             return best;
         }
 
+        /// <summary>
+        /// Auto-shaping: where two stacked parts have different widths, the wider fuel tank gets a conical
+        /// end that meets the narrower part, so stages blend into one smooth hull instead of a step.
+        /// </summary>
+        public static void AutoTaper(RocketBlueprint bp)
+        {
+            foreach (var p in bp.parts) { p.taperBottom = 0f; p.taperTop = 0f; }
+            foreach (var c in bp.parts)
+            {
+                if (c.parentUid < 0 || (c.mode != AttachMode.Below && c.mode != AttachMode.Above)) continue;
+                var parent = bp.Find(c.parentUid);
+                if (parent == null) continue;
+                var upper = c.mode == AttachMode.Below ? parent : c;
+                var lower = c.mode == AttachMode.Below ? c : parent;
+                float du = PartDims.Of(upper).diameter, dl = PartDims.Of(lower).topDiameter;
+                if (Mathf.Abs(du - dl) < 0.05f) continue;
+                if (du > dl && upper.Def.shape == PartShape.Tank) upper.taperBottom = dl;
+                else if (dl > du && lower.Def.shape == PartShape.Tank) lower.taperTop = du;
+            }
+        }
+
         public static bool IsRadialMode(AttachMode m) { return m == AttachMode.Surface || m == AttachMode.Flank; }
 
         // ------------------------------------------------------------------ edits

@@ -58,7 +58,13 @@ namespace Apogee.Flight
         public HoldButton rollLeft, rollRight, rcsUp, rcsDown, rcsLeft, rcsRight, rcsFwd, rcsBack, drive;
         public Slider throttle;
         public Button engineButton, stageButton, mapButton, camButton, insideButton, rcsButton, menuButton, warpUp, warpDown, targetButton;
-        public Button countdownButton, skipButton;
+        public Button countdownButton, skipButton, speedButton, engineTab;
+        public RectTransform enginePanel, engineList, engineLabels;
+        public readonly List<Button> engineRows = new List<Button>();
+        public readonly List<Text> engineTags = new List<Text>();
+        public Action<int> OnEngineRow;
+        public Action<bool> OnAllEngines;
+        public Action OnEngineTab, OnSpeed;
         public Text telemetry, navInfo, warpLabel, message, hint, stageLabel, rolloutText, countdownText, cheatBadge, cockpitInstruments;
         public Image liquidFill, solidFill, rcsFill;
         public GameObject solidRow;
@@ -195,6 +201,29 @@ namespace Apogee.Flight
             UIFactory.Place(rl.rectTransform, new Vector2(0.5f, 0f), new Vector2(0.5f, 0f), new Vector2(0, 92), new Vector2(90, 30));
             rcsPad.gameObject.SetActive(false);
 
+            // ---- engine panel (right): numbered engines, each switchable on/off
+            engineLabels = UIFactory.Rect("Engine Numbers", root);
+            UIFactory.Stretch(engineLabels);
+            engineTab = Btn("ENGINES ▸", () => Call(OnEngineTab), new Vector2(1, 0), new Vector2(-20, 480), new Vector2(210, 64), 22, controls);
+            var ep = UIFactory.Panel(controls, new Color(0.03f, 0.05f, 0.08f, 0.88f), true, "Engines");
+            ep.sprite = UIFactory.RoundedSmall;
+            enginePanel = ep.rectTransform;
+            UIFactory.Place(enginePanel, new Vector2(1, 0), new Vector2(1, 0), new Vector2(-20, 556), new Vector2(430, 520));
+            var col = UIFactory.Rect("Col", enginePanel);
+            UIFactory.Stretch(col, 12, 12, 12, 12);
+            UIFactory.Vertical(col, 8, 0, true);
+            var head = UIFactory.Rect("Head", col);
+            UIFactory.Size(head, -1, 56);
+            var hh = UIFactory.Horizontal(head, 8, 0, true);
+            hh.childAlignment = TextAnchor.MiddleLeft;
+            var title = UIFactory.Label(head, "ENGINES", 22, Theme.Accent, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UIFactory.Size(title, 120, -1, 1);
+            UIFactory.Size(UIFactory.Button(head, "All on", () => { if (OnAllEngines != null) OnAllEngines(true); }, ButtonStyle.Normal, 20), 110);
+            UIFactory.Size(UIFactory.Button(head, "All off", () => { if (OnAllEngines != null) OnAllEngines(false); }, ButtonStyle.Normal, 20), 110);
+            var sc = UIFactory.ScrollList(col, out engineList, 6, 2);
+            UIFactory.Size(sc, -1, -1, -1, 1);
+            enginePanel.gameObject.SetActive(false);
+
             // ---- rollout / countdown panel (bottom centre, before launch)
             rolloutPanel = UIFactory.Rect("Rollout", root);
             rolloutPanel.anchorMin = rolloutPanel.anchorMax = new Vector2(0.5f, 0f);
@@ -205,8 +234,9 @@ namespace Apogee.Flight
             UIFactory.Stretch(rp.rectTransform);
             rolloutText = UIFactory.Label(rolloutPanel, "", 22, Theme.Text, TextAnchor.UpperCenter);
             UIFactory.Stretch(rolloutText.rectTransform, 16, 160, 16, 12);
-            drive = Hold(rolloutPanel, "HOLD TO DRIVE ▶", new Vector2(0.5f, 0), new Vector2(-110, 20), new Vector2(360, 120), 28);
-            skipButton = Btn("Skip ⏩", () => Call(OnSkipRollout), new Vector2(0.5f, 0), new Vector2(200, 20), new Vector2(170, 120), 26, rolloutPanel, true);
+            drive = Hold(rolloutPanel, "HOLD TO DRIVE ▶", new Vector2(0.5f, 0), new Vector2(-140, 20), new Vector2(300, 120), 28);
+            speedButton = Btn("×40", () => Call(OnSpeed), new Vector2(0.5f, 0), new Vector2(65, 20), new Vector2(100, 120), 24, rolloutPanel, true);
+            skipButton = Btn("Skip ⏩", () => Call(OnSkipRollout), new Vector2(0.5f, 0), new Vector2(210, 20), new Vector2(170, 120), 26, rolloutPanel, true);
             countdownButton = Btn("START COUNTDOWN", () => Call(OnCountdown), new Vector2(0.5f, 0), new Vector2(0, 20), new Vector2(520, 120), 30, rolloutPanel, true);
             UIFactory.SetButtonColor(countdownButton, Theme.ButtonPrimary);
             countdownText = UIFactory.Label(root, "", 120, Theme.Text, TextAnchor.MiddleCenter, FontStyle.Bold);
@@ -309,6 +339,35 @@ namespace Apogee.Flight
             UIFactory.Stretch(t.rectTransform, 0, 0, 0, 6);
             t.raycastTarget = false;
             return slider;
+        }
+
+        /// <summary>Rebuilds the engine rows: "1  Kestrel · S1  [ON]".</summary>
+        public void BuildEngineRows(List<string> names)
+        {
+            foreach (var b in engineRows) if (b != null) Destroy(b.gameObject);
+            foreach (var t in engineTags) if (t != null) Destroy(t.gameObject);
+            engineRows.Clear();
+            engineTags.Clear();
+            for (int i = 0; i < names.Count; i++)
+            {
+                int idx = i;
+                var b = UIFactory.Button(engineList, names[i], () => { if (OnEngineRow != null) OnEngineRow(idx); }, ButtonStyle.Normal, 20);
+                UIFactory.Size(b, -1, 60);
+                b.GetComponentInChildren<Text>().alignment = TextAnchor.MiddleLeft;
+                b.GetComponentInChildren<Text>().supportRichText = true;
+                engineRows.Add(b);
+                var holder = UIFactory.Rect("Engine " + (i + 1), engineLabels);
+                holder.anchorMin = holder.anchorMax = Vector2.zero;
+                holder.sizeDelta = new Vector2(46, 46);
+                var bg = UIFactory.Panel(holder, new Color(0f, 0f, 0f, 0.65f), true, "Bg");
+                bg.sprite = UIFactory.RoundedSmall;
+                UIFactory.Stretch(bg.rectTransform);
+                bg.raycastTarget = false;
+                var tag = UIFactory.Label(holder, (i + 1).ToString(), 22, Color.white, TextAnchor.MiddleCenter, FontStyle.Bold);
+                UIFactory.Stretch(tag.rectTransform);
+                tag.raycastTarget = false;
+                engineTags.Add(tag);
+            }
         }
 
         public void Message(string text, float seconds = 2.4f)

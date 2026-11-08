@@ -92,6 +92,9 @@ namespace Apogee.Flight
         public SpaceView space;
         public LocalTerrain terrain;
         public LaunchComplex site;
+        public CloudField clouds;
+        Transform vapor;
+        Material vaporMat;
         public Light sun;
         FlightVessel vessel;
 
@@ -150,6 +153,8 @@ namespace Apogee.Flight
 
             terrain = new GameObject("Local Terrain").AddComponent<LocalTerrain>();
             terrain.Init();
+            clouds = new GameObject("Clouds").AddComponent<CloudField>();
+            clouds.Init();
             site = new GameObject("Launch Complex").AddComponent<LaunchComplex>();
             site.Build(SolarSystem.Earth, vessel.LaunchLat, vessel.LaunchLon);
             smokeAnchor = site.transform;
@@ -157,6 +162,7 @@ namespace Apogee.Flight
             BuildVessel();
             BuildParticles();
             BuildPlasma();
+            BuildVapor();
             vessel.OnDebris += AddDebris;
             vessel.OnExplosion += (p, size) => Explode((p - vessel.pos).ToFloat(), size);
         }
@@ -401,6 +407,33 @@ namespace Apogee.Flight
             go.SetActive(false);
         }
 
+        /// <summary>Prandtl–Glauert vapour cone that flashes around the rocket as it goes through the sound barrier.</summary>
+        void BuildVapor()
+        {
+            var mb = new MeshBuilder();
+            mb.Lathe(new List<Vector2> { new Vector2(0.05f, 0.5f), new Vector2(0.55f, 0.1f), new Vector2(1f, -0.5f) }, 32, 0);
+            var go = new GameObject("Vapor Cone");
+            go.AddComponent<MeshFilter>().sharedMesh = mb.ToMesh("Vapor");
+            vaporMat = MaterialLibrary.Custom("Ghost");
+            vaporMat.SetColor("_Color", new Color(1f, 1f, 1f, 0.35f));
+            var r = go.AddComponent<MeshRenderer>();
+            r.sharedMaterial = vaporMat;
+            r.shadowCastingMode = ShadowCastingMode.Off;
+            vapor = go.transform;
+            go.SetActive(false);
+        }
+
+        /// <summary>Screen position of a part (for the engine number tags). False if hidden/behind.</summary>
+        public bool PartScreen(int uid, out Vector3 screen)
+        {
+            screen = Vector3.zero;
+            GameObject go;
+            if (!partObjects.TryGetValue(uid, out go) || go == null || !cam.enabled) return false;
+            var dims = PartDims.Of(vessel.state.byUid[uid]);
+            screen = cam.WorldToScreenPoint(go.transform.TransformPoint(new Vector3(0f, -dims.height * 0.5f, dims.Radius * 1.3f)));
+            return screen.z > 0f;
+        }
+
         public void Explode(Vector3 renderPos, float size)
         {
             var ep = new ParticleSystem.EmitParams();
@@ -507,6 +540,23 @@ namespace Apogee.Flight
             // local ground and launch site
             terrain.UpdatePatch(b, v.pos, t, sunDir, Color.Lerp(sky, Color.white, 0.25f), haze);
             if (b == site.Body) site.Place(t, v.pos); else site.gameObject.SetActive(false);
+
+            // weather and the sound barrier
+            float sunUp = Vector3.Dot(up, sunDir);
+            Color sunCol = Color.Lerp(new Color(1f, 0.55f, 0.3f), new Color(1f, 0.97f, 0.92f), Mathf.Clamp01(sunUp * 4f));
+            clouds.UpdateField(b, v.pos, t, sunDir, sunCol * Mathf.Clamp01(sunUp * 3f + 0.4f), Color.Lerp(new Color(0.08f, 0.09f, 0.12f), new Color(0.55f, 0.62f, 0.72f), day));
+            double mach = v.Mach;
+            bool cone = v.status == FlightStatus.Flying && mach > 0.93 && mach < 1.1 && v.dynamicPressure > 12000;
+            if (vapor.gameObject.activeSelf != cone) vapor.gameObject.SetActive(cone);
+            if (cone)
+            {
+                var air = v.airVelocity.normalized.ToFloat();
+                float rr = v.maxRadius * 2.6f;
+                vapor.position = air * (v.length * 0.1f);
+                vapor.rotation = Quaternion.FromToRotation(Vector3.up, air);
+                vapor.localScale = new Vector3(rr, rr * 1.4f, rr);
+                vaporMat.SetColor("_Color", new Color(1f, 1f, 1f, 0.45f * (1f - Mathf.Abs((float)mach - 1f) / 0.12f)));
+            }
 
             // the Solar System behind it all
             ViewerFrame = v.pos + (Vector3d)cam.transform.position;

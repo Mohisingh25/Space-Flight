@@ -45,7 +45,8 @@ namespace Apogee.Rendering
 
         public static PartModel Get(PartDefinition def, PartDims dims)
         {
-            string key = def.id + "|" + dims.diameter.ToString("0.000") + "|" + dims.height.ToString("0.000");
+            string key = def.id + "|" + dims.diameter.ToString("0.000") + "|" + dims.height.ToString("0.000")
+                + (dims.Tapered ? "|t" + dims.bottomEnd.ToString("0.000") + "|" + dims.topEnd.ToString("0.000") : "");
             PartModel model;
             if (cache.TryGetValue(key, out model) && model.mesh != null) return model;
 
@@ -81,7 +82,10 @@ namespace Apogee.Rendering
             float r = d.Radius, rt = d.TopRadius, h = d.height;
             switch (def.shape)
             {
-                case PartShape.Tank: Tank(def, r, h, mb, m); break;
+                case PartShape.Tank:
+                    if (d.Tapered) TaperedTank(def, r, d.bottomEnd * 0.5f, d.topEnd * 0.5f, h, mb, m);
+                    else Tank(def, r, h, mb, m);
+                    break;
                 case PartShape.NoseCone: NoseCone(r, h, mb, m); break;
                 case PartShape.Adapter: Adapter(r, rt, h, mb, m); break;
                 case PartShape.Decoupler: Decoupler(r, h, mb, m); break;
@@ -142,6 +146,27 @@ namespace Apogee.Rendering
         }
 
         // ------------------------------------------------------------------ structures
+
+        /// <summary>Tank whose ends narrow (or widen) to meet the part stacked on it: cylinder plus conical skirts.</summary>
+        static void TaperedTank(PartDefinition def, float r, float rb, float rt, float h, MeshBuilder mb, Mats m)
+        {
+            int seg = Segs(r);
+            float y0 = -h / 2, y1 = h / 2, lip = Mathf.Min(0.06f, h * 0.05f);
+            string body = def.finish == Finish.BlackWhite ? "white" : BodyKey(def.finish);
+            float uRep = Circ(r, 1.6f);
+            float lb = Mathf.Abs(rb - r) > 0.005f ? PartDims.TaperLength(r * 2f, rb * 2f, h) : 0f;
+            float lt = Mathf.Abs(rt - r) > 0.005f ? PartDims.TaperLength(r * 2f, rt * 2f, h) : 0f;
+            mb.Lathe(P(rb, y0 + lip, r, y0 + lip + lb), seg, m[body], uRep, 0.5f);
+            mb.Lathe(P(r, y0 + lip + lb, r, y1 - lip - lt), seg, m[body], uRep, 0.5f);
+            mb.Lathe(P(r, y1 - lip - lt, rt, y1 - lip), seg, m[body], uRep, 0.5f);
+            // weld seams where cone meets cylinder
+            if (lb > 0f) mb.Lathe(P(r, y0 + lip + lb - 0.02f, r * 1.006f, y0 + lip + lb, r, y0 + lip + lb + 0.02f), seg, m["aluminium"]);
+            if (lt > 0f) mb.Lathe(P(r, y1 - lip - lt - 0.02f, r * 1.006f, y1 - lip - lt, r, y1 - lip - lt + 0.02f), seg, m["aluminium"]);
+            mb.Lathe(P(rb * 0.96f, y0, rb * 1.008f, y0 + lip * 0.4f, rb * 1.008f, y0 + lip, rb, y0 + lip), seg, m["aluminium"]);
+            mb.Lathe(P(rt, y1 - lip, rt * 1.008f, y1 - lip, rt * 1.008f, y1 - lip * 0.4f, rt * 0.96f, y1), seg, m["aluminium"]);
+            mb.Lathe(P(0f, y0, rb * 0.96f, y0), seg, m["dark_metal"]);
+            mb.Lathe(P(rt * 0.96f, y1, 0f, y1), seg, m["dark_metal"]);
+        }
 
         static void Tank(PartDefinition def, float r, float h, MeshBuilder mb, Mats m)
         {

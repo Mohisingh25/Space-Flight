@@ -15,8 +15,8 @@ namespace Apogee.Flight
     /// <summary>Optional cheats (Settings → Cheats). All off by default; tests run with real physics.</summary>
     public class FlightCheats
     {
-        public bool infiniteFuel, noGravity, noDrag, unbreakable, superThrust;
-        public bool Any { get { return infiniteFuel || noGravity || noDrag || unbreakable || superThrust; } }
+        public bool infiniteFuel, noGravity, noDrag, unbreakable, superThrust, noHeat;
+        public bool Any { get { return infiniteFuel || noGravity || noDrag || unbreakable || superThrust || noHeat; } }
     }
 
     /// <summary>A separated piece: falls, drags and burns up or crashes on its own.</summary>
@@ -104,6 +104,11 @@ namespace Apogee.Flight
         public readonly Dictionary<int, float> engineOutput = new Dictionary<int, float>();
         public readonly Dictionary<int, float> rcsOutput = new Dictionary<int, float>();
         readonly Dictionary<int, double> poolFlow = new Dictionary<int, double>();
+        readonly Dictionary<int, double> engineFlow = new Dictionary<int, double>();
+
+        // ---- fuel transfer between tanks (tap one tank, then another)
+        public int transferPick = -1, transferFrom = -1, transferTo = -1;
+        public float transferRate;   // t/s currently pumping
 
         // ---- telemetry
         public double lastAcceleration, dynamicPressure, heatFlux, machLike;
@@ -125,6 +130,7 @@ namespace Apogee.Flight
         {
             SolarSystem.Build();
             bp = blueprint;
+            RocketAssembly.AutoTaper(bp);
             if (!bp.customStaging || bp.stageCount == 0) StagingSystem.Restage(bp);
             state = new VehicleState(bp, 0f);
             poses = RocketLayout.Compute(bp);
@@ -172,6 +178,19 @@ namespace Apogee.Flight
             double dLon = east / (body.radius * Math.Max(0.1, Math.Cos(lat * Math.PI / 180))) * 180 / Math.PI;
             PlaceOnSurface(lat, lon + dLon, height);
             LaunchLon = lon;
+        }
+
+        /// <summary>Puts the vessel in a circular equatorial orbit (cheat start), nose pointing prograde.</summary>
+        public void PlaceInOrbit(CelestialBody b, double altitude)
+        {
+            body = b;
+            double r = b.radius + altitude;
+            pos = new Vector3d(r, 0, 0);
+            vel = new Vector3d(0, 0, Math.Sqrt(b.mu / r));
+            rot = Quaternion.LookRotation(Vector3.right, Vector3.forward);
+            angVel = Vector3.zero;
+            status = FlightStatus.Flying;
+            orbitValid = false;
         }
 
         void SyncToSurface()
@@ -400,6 +419,85 @@ namespace Apogee.Flight
             return max > 0f ? cur / max : -1f;
         }
 
+        /// <summary>Speed of sound (m/s) at an altitude: Earth's standard atmosphere temperature profile, generic elsewhere.</summary>
+        public static double SpeedOfSound(CelestialBody b, double alt)
+        {
+            if (b == null || !b.HasAtmosphere) return 0;
+            double T;
+            if (b.name == "Earth")
+            {
+                double km = alt / 1000.0;
+                if (km < 11) T = 288.15 - 6.5 * km;
+                else if (km < 20) T = 216.65;
+                else if (km < 32) T = 216.65 + (km - 20);
+                else if (km < 47) T = 228.65 + 2.8 * (km - 32);
+                else if (km < 51) T = 270.65;
+                else if (km < 71) T = 270.65 - 2.8 * (km - 51);
+                else T = Math.Max(186.9, 214.65 - 2.0 * (km - 71));
+                return Math.Sqrt(1.4 * 287.05 * T);
+            }
+            if (b.name == "Mars") return 240;
+            if (b.name == "Venus") return 410;
+            if (b.name == "Titan") return 195;
+            return 600;
+        }
+
+        public double Mach
+        {
+            get
+            {
+                double a = SpeedOfSound(body, Math.Max(0, Altitude));
+                return a > 0 && InAtmosphere ? SurfaceVelocity.magnitude / a : 0;
+            }
+        }
+
+        /// <summary>Main engines in a stable order: by stage, then around the rocket. Number = index + 1.</summary>
+        public List<int> EngineList()
+        {
+            var list = new List<int>();
+            foreach (var p in bp.parts) if (p.Def.IsEngine && !p.Def.isRcs) list.Add(p.uid);
+            list.Sort((x, y) =>
+            {
+                var a = state.byUid[x]; var b = state.byUid[y];
+                int sa = a.stage < 0 ? 999 : a.stage, sb = b.stage < 0 ? 999 : b.stage;
+                if (sa != sb) return sa.CompareTo(sb);
+                var pa = Pose(x).position; var pb = Pose(y).position;
+                float aa = Mathf.Atan2(pa.z, pa.x), ab = Mathf.Atan2(pb.z, pb.x);
+                if (Mathf.Abs(pa.x) + Mathf.Abs(pa.z) < 0.05f) aa = -10f;
+                if (Mathf.Abs(pb.x) + Mathf.Abs(pb.z) < 0.05f) ab = -10f;
+                if (Mathf.Abs(aa - ab) > 1e-3f) return aa.CompareTo(ab);
+                return x.CompareTo(y);
+            });
+            return list;
+        }
+
+        public enum EngineState { Ready, Running, Off, NoFuel, Gone }
+
+        public EngineState GetEngineState(int uid)
+        {
+            if (!state.alive.Contains(uid)) return EngineState.Gone;
+            if (state.PoolFuel(state.PoolKey(uid, fuelGroups), fuelGroups) <= 1e-5f) return EngineState.NoFuel;
+            if (!state.ignited.Contains(uid)) return EngineState.Ready;
+            return engineOff.Contains(uid) ? EngineState.Off : EngineState.Running;
+        }
+
+        /// <summary>Starts or stops one engine (solid motors can only be lit).</summary>
+        public string SetEngine(int uid, bool on)
+        {
+            if (!state.alive.Contains(uid) || status == FlightStatus.Crashed) return null;
+            var d = state.byUid[uid].Def;
+            if (on)
+            {
+                state.ignited.Add(uid);
+                engineOff.Remove(uid);
+                enginesOn = true;
+                return d.displayName + " on";
+            }
+            if (d.solidFuel && state.ignited.Contains(uid)) return "Solid boosters can't be shut down";
+            if (state.ignited.Contains(uid)) engineOff.Add(uid);
+            return d.displayName + " off";
+        }
+
         public bool HasRcs
         {
             get { foreach (int u in state.alive) if (state.byUid[u].Def.isRcs) return true; return false; }
@@ -558,11 +656,68 @@ namespace Apogee.Flight
                 return d.isDockingPort ? "Undocked" : d.isFairing ? "Fairing jettisoned" : "Separated";
             }
             if (d.isRcs) { rcsOn = !rcsOn; return rcsOn ? "RCS on" : "RCS off"; }
+            if (d.fuelMass > 0f && !d.solidFuel) return TapTank(uid);
             float fuel; state.fuel.TryGetValue(uid, out fuel);
             float cap = PartMass.Fuel(p);
             float temp; temperature.TryGetValue(uid, out temp);
             return d.displayName + "  ·  " + PartDefinition.FormatMass(PartMass.Dry(p) + fuel) +
                 (cap > 0f ? "  ·  fuel " + Mathf.RoundToInt(100f * fuel / cap) + "%" : "") + "  ·  " + Mathf.RoundToInt(temp - 273f) + " °C";
+        }
+
+        bool SameFuel(int a, int b)
+        {
+            var da = state.byUid[a].Def; var db = state.byUid[b].Def;
+            return da.monoprop == db.monoprop && da.isRcs == db.isRcs && !da.solidFuel && !db.solidFuel;
+        }
+
+        string TankInfo(int uid)
+        {
+            var p = state.byUid[uid];
+            float cap = PartMass.Fuel(p);
+            return p.Def.displayName + " " + Mathf.RoundToInt(100f * Fuel(uid) / Mathf.Max(1e-5f, cap)) + "% (" + Fuel(uid).ToString("0.0") + " t)";
+        }
+
+        /// <summary>Tap a tank to pick it, tap a second tank to pump fuel from the first into it; tap again to stop.</summary>
+        string TapTank(int uid)
+        {
+            if (transferFrom >= 0 && (uid == transferFrom || uid == transferTo))
+            {
+                transferFrom = transferTo = -1; transferPick = -1; transferRate = 0f;
+                return "Fuel transfer stopped";
+            }
+            if (transferPick < 0 || !state.alive.Contains(transferPick))
+            {
+                transferPick = uid;
+                return "Selected " + TankInfo(uid) + " — tap another tank to pump fuel into it";
+            }
+            if (transferPick == uid) { transferPick = -1; return "Tank deselected"; }
+            if (!SameFuel(transferPick, uid)) { transferPick = -1; return "Those tanks hold different propellants"; }
+            if (Fuel(transferPick) <= 1e-4f) { transferPick = -1; return "That tank is empty"; }
+            transferFrom = transferPick;
+            transferTo = uid;
+            transferPick = -1;
+            return "Pumping fuel: " + state.byUid[transferFrom].Def.displayName + " → " + state.byUid[transferTo].Def.displayName + " (tap either to stop)";
+        }
+
+        void UpdateTransfer(double dt)
+        {
+            transferRate = 0f;
+            if (transferFrom < 0) return;
+            if (!state.alive.Contains(transferFrom) || !state.alive.Contains(transferTo)) { transferFrom = transferTo = -1; return; }
+            float capTo = PartMass.Fuel(state.byUid[transferTo]);
+            float room = capTo - Fuel(transferTo);
+            float rate = Mathf.Max(0.2f, capTo * 0.04f);                 // pumps: ~4% of the receiving tank per second
+            float amount = Mathf.Min((float)(rate * dt), Mathf.Min(Fuel(transferFrom), room));
+            if (amount <= 1e-6f)
+            {
+                Say(room <= 1e-4f ? "Transfer complete — receiving tank full" : "Transfer complete — source tank empty");
+                transferFrom = transferTo = -1;
+                return;
+            }
+            state.fuel[transferFrom] -= amount;
+            state.fuel[transferTo] = Fuel(transferTo) + amount;
+            transferRate = rate;
+            Recalc();
         }
 
         void Reseat()
@@ -618,6 +773,7 @@ namespace Apogee.Flight
         /// <summary>Advances time by dt seconds. Uses full physics when anything acts, Kepler rails otherwise.</summary>
         public void Advance(double dt)
         {
+            UpdateTransfer(dt);
             if (status == FlightStatus.Crashed) { time += dt; StepDebris(dt); return; }
             if (Grounded && !(enginesOn && AnyEngineBurning() && status != FlightStatus.Rollout))
             {
@@ -726,6 +882,7 @@ namespace Apogee.Flight
             double gimbalTorque = 0;
             engineOutput.Clear();
             poolFlow.Clear();
+            engineFlow.Clear();
             bool burning = false;
             double tMul = cheats.superThrust ? 5.0 : 1.0;
             foreach (int u in state.ignited)
@@ -741,6 +898,7 @@ namespace Apogee.Flight
                 double isp = Math.Max(d.ispVac * 0.05, d.ispVac + (d.ispSL - d.ispVac) * pr);
                 double Fi = flow * isp * G0 * tMul;
                 double cur; poolFlow.TryGetValue(key, out cur); poolFlow[key] = cur + flow;
+                engineFlow[u] = flow;
                 var pose = Pose(u);
                 var dir = pose.rotation * Vector3.up;
                 var f = dir * (float)Fi;
@@ -752,7 +910,7 @@ namespace Apogee.Flight
                 burning = true;
             }
             if (!cheats.infiniteFuel)
-                foreach (var kv in poolFlow) state.Drain(kv.Key, (float)(kv.Value * dt), fuelGroups);
+                foreach (var kv in engineFlow) state.DrainFrom(kv.Key, (float)(kv.Value * dt), fuelGroups);
 
             // ---------------- RCS translation
             rcsFiring = false;
@@ -1022,7 +1180,7 @@ namespace Apogee.Flight
                 if (frac > maxTempFraction) maxTempFraction = frac;
                 if (frac > 1f && worst < 0) worst = u;
             }
-            if (worst >= 0 && !cheats.unbreakable) DestroyPart(worst, state.byUid[worst].Def.displayName + " burned up in re-entry heating");
+            if (worst >= 0 && !cheats.unbreakable && !cheats.noHeat) DestroyPart(worst, state.byUid[worst].Def.displayName + " burned up in re-entry heating");
         }
 
         // =====================================================================================
@@ -1105,8 +1263,8 @@ namespace Apogee.Flight
             var parent = state.byUid[child.parentUid];
             var cd = PartDims.Of(child);
             var pd = PartDims.Of(parent);
-            float dc = child.mode == AttachMode.Above ? cd.diameter : cd.topDiameter;
-            float dp = child.mode == AttachMode.Above ? pd.topDiameter : pd.diameter;
+            float dc = child.mode == AttachMode.Above ? cd.bottomEnd : cd.topEnd;
+            float dp = child.mode == AttachMode.Above ? pd.topEnd : pd.bottomEnd;
             float d = Mathf.Max(0.3f, Mathf.Min(dc, dp));
             switch (child.mode)
             {

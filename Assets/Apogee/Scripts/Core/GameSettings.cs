@@ -27,6 +27,10 @@ namespace Apogee.Core
         // Cheats: only active when the master switch is on.
         public bool cheatsEnabled;
         public bool cheatInfiniteFuel, cheatNoGravity, cheatNoDrag, cheatUnbreakable, cheatSuperThrust;
+        public bool cheatNoHeat;
+        public int cheatStart;          // 0 launch pad, 1 Earth orbit, 2 lunar orbit, 3 Mars orbit
+
+        public static readonly string[] StartNames = { "Launch pad (normal)", "Low Earth orbit (250 km)", "Lunar orbit (100 km)", "Mars orbit (300 km)" };
 
         public event Action Changed;
 

@@ -10,6 +10,18 @@ the project, mobile rendering setup, main menu and a working modular rocket buil
 
 ---
 
+## Phase 4.1 — launch site, clouds, engine panel
+
+- **Space centre:** tropical grassland with ~900 palms and trees, gravel crawlerway with lamp posts, roads and car park, propellant storage spheres with feed lines to the pad, control centre, hangars, perimeter fence, lightning masts.
+- **Rollout:** crawler-transporter with moving tracks and dust, diesel rumble; speed ×1 (real 1.6 km/h), ×10, ×40, ×100 with ETA.
+- **Clouds:** cumulus at 1.2–3 km (sunlit tops, shaded bases, sunset colours) and high cirrus; the rocket flies through them.
+- **Flight alerts:** troposphere → stratosphere (12 km) → mesosphere (50 km) → thermosphere (80 km) → Kármán line (100 km, "you are in space") → leaving the atmosphere (140 km), and on the way down; Mach 1 with a vapour cone at the sound barrier; Max-Q.
+- **Engine panel:** ENGINES button (right) lists every engine as 1, 2, 3…, with ON / OFF / READY / NO FUEL, All on / All off, and number tags shown next to each engine on the rocket.
+- **Auto-shaping:** stacking parts of different widths makes the wider tank taper into a cone to meet the narrower part (with correspondingly less fuel).
+- **Separate fuel tanks:** each engine drains the tank nearest to it first, then the next one up. Tanks attached to the side of another tank are their own fuel system (no crossfeed) and feed only engines mounted on them.
+- **Fuel transfer:** in flight tap a tank, then tap another tank to pump fuel into it (~4% of the receiving tank per second); tap either tank to stop.
+- **More cheats:** no re-entry heat damage; start in low Earth orbit, lunar orbit or Mars orbit.
+
 ## Phase 4 — real 3D Solar System
 
 - **Real-scale Solar System in 3D:** the Sun, all 8 planets and the Moon, Phobos, Deimos, Io, Europa, Ganymede, Callisto and Titan on real orbits (J2000 elements; game starts 8 Nov 2026). Real radii, gravity, rotation and atmospheres (Earth, Venus, Mars, Titan, the gas giants).

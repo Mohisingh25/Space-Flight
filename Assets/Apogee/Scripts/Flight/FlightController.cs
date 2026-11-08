@@ -59,6 +59,14 @@ namespace Apogee.Flight
                 vessel.cheats.noDrag = settings.cheatNoDrag;
                 vessel.cheats.unbreakable = settings.cheatUnbreakable;
                 vessel.cheats.superThrust = settings.cheatSuperThrust;
+                vessel.cheats.noHeat = settings.cheatNoHeat;
+                switch (settings.cheatStart)
+                {
+                    case 1: vessel.PlaceInOrbit(SolarSystem.Earth, 250000); break;
+                    case 2: vessel.PlaceInOrbit(SolarSystem.Moon, 100000); break;
+                    case 3: vessel.PlaceInOrbit(SolarSystem.Mars, 300000); break;
+                }
+                if (vessel.status == FlightStatus.Flying) { staged0 = true; lowering = 1f; crawlerEast = 300f; }
             }
 
             world = new GameObject("Flight World").AddComponent<FlightWorld>();
@@ -85,8 +93,161 @@ namespace Apogee.Flight
             engineAudio.loop = true;
             engineAudio.volume = 0f;
             engineAudio.Play();
-            hud.Message("Hold DRIVE to roll the rocket out to the pad", 4f);
+            hud.Message(vessel.status == FlightStatus.Flying ? "Cheat start: in orbit around " + vessel.body.name : "Hold DRIVE to roll the rocket out to the pad", 4f);
+            engines = vessel.EngineList();
+            var names = new System.Collections.Generic.List<string>();
+            for (int i = 0; i < engines.Count; i++)
+            {
+                var p = vessel.state.byUid[engines[i]];
+                names.Add("<b>" + (i + 1) + "</b>  " + p.Def.displayName);
+            }
+            hud.BuildEngineRows(names);
+            hud.engineTab.gameObject.SetActive(engines.Count > 0);
+            UIFactory.SetLabel(hud.speedButton, "×" + RolloutSpeeds[speedIndex]);
         }
+
+        // ------------------------------------------------------------------ engine panel
+
+        System.Collections.Generic.List<int> engines;
+        bool enginePanelOpen;
+
+        void EngineRow(int i)
+        {
+            if (i < 0 || i >= engines.Count) return;
+            int uid = engines[i];
+            var st = vessel.GetEngineState(uid);
+            if (st == FlightVessel.EngineState.Gone) return;
+            string msg = vessel.SetEngine(uid, st != FlightVessel.EngineState.Running);
+            if (msg != null) hud.Message("Engine " + (i + 1) + ": " + msg, 1.6f);
+            Click();
+        }
+
+        void AllEngines(bool on)
+        {
+            int n = 0;
+            foreach (int uid in engines)
+            {
+                var st = vessel.GetEngineState(uid);
+                if (st == FlightVessel.EngineState.Gone || st == FlightVessel.EngineState.NoFuel) continue;
+                if (on && st == FlightVessel.EngineState.Ready && vessel.state.byUid[uid].stage > vessel.nextStage) continue; // don't light upper stages
+                vessel.SetEngine(uid, on);
+                n++;
+            }
+            hud.Message(on ? "All available engines on" : "All engines off (solids keep burning)", 1.6f);
+            Click();
+        }
+
+        void UpdateEnginePanel()
+        {
+            bool open = enginePanelOpen && !map.Active && hud.controls.gameObject.activeSelf;
+            hud.enginePanel.gameObject.SetActive(open);
+            hud.engineLabels.gameObject.SetActive(open);
+            hud.telemetry.transform.parent.gameObject.SetActive(!open);
+            hud.navInfo.gameObject.SetActive(!open);
+            UIFactory.SetLabel(hud.engineTab, open ? "ENGINES ◂" : "ENGINES ▸");
+            if (!open) return;
+            var canvasRt = hud.engineLabels;
+            for (int i = 0; i < engines.Count; i++)
+            {
+                int uid = engines[i];
+                var st = vessel.GetEngineState(uid);
+                var row = hud.engineRows[i];
+                string state; Color col;
+                switch (st)
+                {
+                    case FlightVessel.EngineState.Running: state = "<color=#7dff9a>ON</color>"; col = new Color(0.12f, 0.32f, 0.18f, 1f); break;
+                    case FlightVessel.EngineState.Off: state = "<color=#ff9a7d>OFF</color>"; col = Theme.ButtonBg; break;
+                    case FlightVessel.EngineState.Ready: state = "<color=#cfd8e3>READY</color>"; col = Theme.ButtonBg; break;
+                    case FlightVessel.EngineState.NoFuel: state = "<color=#8fa3b8>NO FUEL</color>"; col = new Color(0.12f, 0.12f, 0.14f, 1f); break;
+                    default: state = "<color=#667788>DROPPED</color>"; col = new Color(0.08f, 0.08f, 0.1f, 1f); break;
+                }
+                float o; vessel.engineOutput.TryGetValue(uid, out o);
+                var p = vessel.state.byUid[uid];
+                UIFactory.SetLabel(row, "<b>" + (i + 1) + "</b>  " + p.Def.displayName + "   " + state + (o > 0 ? "  " + Mathf.RoundToInt(o * 100) + "%" : ""));
+                UIFactory.SetButtonColor(row, col);
+                // number tag next to the engine in 3D
+                var holder = (RectTransform)hud.engineTags[i].transform.parent;
+                Vector3 sp = Vector3.zero;
+                bool vis = st != FlightVessel.EngineState.Gone && world.PartScreen(uid, out sp);
+                if (holder.gameObject.activeSelf != vis) holder.gameObject.SetActive(vis);
+                if (!vis) continue;
+                Vector2 local;
+                RectTransformUtility.ScreenPointToLocalPointInRectangle(canvasRt, sp, null, out local);
+                holder.anchoredPosition = local + canvasRt.rect.size * 0.5f;
+                hud.engineTags[i].color = st == FlightVessel.EngineState.Running ? new Color(0.5f, 1f, 0.6f) : Color.white;
+            }
+        }
+
+        // ------------------------------------------------------------------ flight milestones
+
+        int lastLayer = -1;
+        CelestialBody layerBody;
+        bool machAnnounced, maxQAnnounced, cloudsAnnounced;
+        double peakQ;
+
+        static readonly double[] EarthLayers = { 0, 12000, 50000, 80000, 100000, 140000 };
+        static readonly string[] EarthUp =
+        {
+            "", "Entered the STRATOSPHERE (12 km) — above the weather and into the ozone layer",
+            "Entered the MESOSPHERE (50 km) — the air is 1/1000 of sea level",
+            "Entered the THERMOSPHERE (80 km) — the sky is black now",
+            "Crossed the KÁRMÁN LINE (100 km) — you are in SPACE!",
+            "Left the atmosphere (140 km) — drag is negligible; you're in the exosphere"
+        };
+        static readonly string[] EarthDown =
+        {
+            "Back in the TROPOSPHERE (below 12 km) — the weather layer", "Descending through the STRATOSPHERE",
+            "Descending through the MESOSPHERE — peak heating ahead", "Below the Kármán line — re-entering the atmosphere",
+            "Entering the upper THERMOSPHERE — atmospheric interface", ""
+        };
+
+        void Milestones()
+        {
+            var v = vessel;
+            if (v.status != FlightStatus.Flying) return;
+            double alt = v.Altitude;
+            if (layerBody != v.body) { layerBody = v.body; lastLayer = -1; }
+            int layer;
+            if (v.body.name == "Earth")
+            {
+                layer = 0;
+                for (int i = 0; i < EarthLayers.Length; i++) if (alt >= EarthLayers[i]) layer = i;
+                if (lastLayer >= 0 && layer != lastLayer)
+                {
+                    string m = layer > lastLayer ? EarthUp[layer] : EarthDown[layer];
+                    if (m.Length > 0) Alert(m);
+                }
+            }
+            else
+            {
+                layer = v.body.HasAtmosphere && alt < v.body.atmosphere.height ? 0 : 1;
+                if (lastLayer >= 0 && layer != lastLayer)
+                    Alert(layer == 0 ? "Entering " + v.body.name + "'s atmosphere" : "Left " + v.body.name + "'s atmosphere");
+            }
+            lastLayer = layer;
+
+            if (v.body.name == "Earth" && !cloudsAnnounced && alt > 3200 && v.VerticalSpeed > 0) { cloudsAnnounced = true; Alert("Through the cloud deck"); }
+            double mach = v.Mach;
+            if (!machAnnounced && mach >= 1.0) { machAnnounced = true; Alert("MACH 1 — supersonic! (" + v.SurfaceVelocity.magnitude.ToString("0") + " m/s)"); }
+            if (v.dynamicPressure > peakQ) peakQ = v.dynamicPressure;
+            if (!maxQAnnounced && peakQ > 8000 && v.dynamicPressure < peakQ * 0.97 && v.VerticalSpeed > 0)
+            {
+                maxQAnnounced = true;
+                Alert("MAX-Q — peak aerodynamic pressure " + (peakQ / 1000).ToString("0.0") + " kPa passed");
+            }
+        }
+
+        void Alert(string text)
+        {
+            hud.Message(text, 4f);
+            AppRoot.Instance.Audio.Play(Sfx.Click, 0.9f);
+        }
+
+        // ------------------------------------------------------------------ rollout speed
+
+        static readonly int[] RolloutSpeeds = { 1, 10, 40, 100 };
+        int speedIndex = 2;
+        const float CrawlerRealSpeed = 0.447f;   // m/s — the real crawler-transporter does 1.6 km/h loaded
 
         void WireHud()
         {
@@ -102,6 +263,10 @@ namespace Apogee.Flight
             hud.OnWarpDown = () => SetWarp(warpIndex - 1);
             hud.OnCountdown = StartCountdown;
             hud.OnSkipRollout = () => { crawlerEast = 0f; Click(); };
+            hud.OnEngineTab = () => { enginePanelOpen = !enginePanelOpen; Click(); };
+            hud.OnEngineRow = EngineRow;
+            hud.OnAllEngines = AllEngines;
+            hud.OnSpeed = () => { speedIndex = (speedIndex + 1) % RolloutSpeeds.Length; UIFactory.SetLabel(hud.speedButton, "×" + RolloutSpeeds[speedIndex]); Click(); };
             hud.OnSas = m => { vessel.sas = vessel.sas == m ? SasMode.Off : m; if (m == SasMode.Target && vessel.target == null) hud.Message("Pick a target in the map first", 2f); Click(); };
             hud.OnTarget = () =>
             {
@@ -217,6 +382,8 @@ namespace Apogee.Flight
 
             if (map.Active) map.Update(dt); else world.Render(dt);
             UpdateHud();
+            UpdateEnginePanel();
+            Milestones();
             UpdateAudio(paused);
         }
 
@@ -349,8 +516,7 @@ namespace Apogee.Flight
                 bool driving = hud.drive.Held || Input.GetKey(KeyCode.F);
                 if (lowering < 0f)
                 {
-                    // the real crawler does 1.6 km/h; rollout here runs ~25× faster
-                    if (driving) crawlerEast = Mathf.Max(0f, crawlerEast - dt * 11f);
+                    if (driving) crawlerEast = Mathf.Max(0f, crawlerEast - dt * CrawlerRealSpeed * RolloutSpeeds[speedIndex]);
                     vessel.PlaceEastOf(SiteLat, SiteLon, crawlerEast, LaunchComplex.CrawlerDeck);
                     world.site.SetCrawler(crawlerEast);
                     if (crawlerEast <= 0f) { lowering = 0f; hud.Message("At the pad — setting the rocket on the launch mount", 3f); }
@@ -412,7 +578,8 @@ namespace Apogee.Flight
                 hud.countdownButton.gameObject.SetActive(!rolling && countdown < 0f);
                 hud.rolloutText.text = rolling
                     ? (lowering < 0f
-                        ? "<b>ROLLOUT</b> — crawler-transporter to Pad 1\n" + Mathf.RoundToInt(crawlerEast) + " m to go · " + (hud.drive.Held ? "11 m/s (sped up ×25)" : "stopped")
+                        ? "<b>ROLLOUT</b> — crawler-transporter to Pad 1\n" + Mathf.RoundToInt(crawlerEast) + " m to go · " +
+                          (hud.drive.Held || Input.GetKey(KeyCode.F) ? (CrawlerRealSpeed * RolloutSpeeds[speedIndex] * 3.6f).ToString("0.0") + " km/h" + (speedIndex == 0 ? " (real speed)" : " (real 1.6 km/h, ×" + RolloutSpeeds[speedIndex] + ")") + " · ETA " + FlightHUD.FormatTime(crawlerEast / (CrawlerRealSpeed * RolloutSpeeds[speedIndex])) : "stopped")
                         : "Lowering onto the hold-down clamps…")
                     : "<b>ON THE PAD</b> — " + launchBlueprint.name + "\n" + v.mass.ToString("N1") + " t · thrust " + v.MaxThrustNow().ToString("N0") + " kN";
                 hud.rolloutText.supportRichText = true;
@@ -465,6 +632,10 @@ namespace Apogee.Flight
                 string col = v.maxTempFraction > 0.85f ? "#ff5544" : v.maxTempFraction > 0.6f ? "#ffbb44" : "#ffffff";
                 sb.Append("<color=").Append(col).Append(">Heat ").Append(Mathf.RoundToInt(v.maxTempFraction * 100f)).Append("% of limit</color>\n");
             }
+            if (v.transferFrom >= 0)
+                sb.Append("<color=#7fd4ff>Pumping ").Append(v.transferRate.ToString("0.0")).Append(" t/s → ").Append(v.state.byUid[v.transferTo].Def.displayName).Append("</color>\n");
+            else if (v.transferPick >= 0)
+                sb.Append("<color=#7fd4ff>Tank picked — tap the tank to fill</color>\n");
             if (v.dynamicPressure > 1000) sb.Append("Q ").Append((v.dynamicPressure / 1000).ToString("N1")).Append(" kPa\n");
             hud.telemetry.text = sb.ToString();
 
@@ -501,6 +672,8 @@ namespace Apogee.Flight
             foreach (var o in vessel.engineOutput.Values) output = Mathf.Max(output, o);
             double pr = vessel.body.HasAtmosphere ? vessel.body.atmosphere.PressureAtm(Math.Max(0, vessel.Altitude)) : 0;
             float vol = output * (0.25f + 0.75f * Mathf.Clamp01((float)pr * 2f));
+            bool rumbling = vessel.status == FlightStatus.Rollout && (hud.drive.Held || Input.GetKey(KeyCode.F)) && lowering < 0f;
+            if (rumbling) { vol = 0.22f; output = -1.6f; }   // diesel-electric crawler rumble
             if (paused || map.Active) vol *= 0.3f;
             engineAudio.volume = Mathf.MoveTowards(engineAudio.volume, vol * settings.sfxVolume * 0.9f, Time.unscaledDeltaTime * 2f);
             engineAudio.pitch = 0.85f + 0.25f * output;
