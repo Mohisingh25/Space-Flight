@@ -20,12 +20,24 @@ env:
   UNITY_PASSWORD: ${{ secrets.UNITY_PASSWORD }}
 
 jobs:
+  # ---------------------------------------------------------------- Android
   android:
     name: Android APK
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
-      - name: Free disk space
+      - name: Check Unity secrets
+        run: |
+          missing=""
+          [ -z "$UNITY_LICENSE" ] && missing="$missing UNITY_LICENSE"
+          [ -z "$UNITY_EMAIL" ] && missing="$missing UNITY_EMAIL"
+          [ -z "$UNITY_PASSWORD" ] && missing="$missing UNITY_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secrets:$missing. Add them in Settings > Secrets and variables > Actions (see README)."
+            exit 1
+          fi
+
+      - name: Free disk space (Unity images are large)
         uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: false
@@ -34,16 +46,20 @@ jobs:
           haskell: true
           large-packages: false
           swap-storage: false
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           lfs: false
-      - uses: actions/cache@v4
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
         with:
           path: Library
           key: Library-Android-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
           restore-keys: |
             Library-Android-
+
       - name: Build APK with Unity
         uses: game-ci/unity-builder@v4
         with:
@@ -54,19 +70,29 @@ jobs:
           androidExportType: androidPackage
           versioning: None
           customParameters: ${{ inputs.development && '-apogeeDev' || '' }}
-      - uses: actions/upload-artifact@v4
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
         with:
           name: Apogee-Android-APK
           path: build/Android/*.apk
           if-no-files-found: error
           retention-days: 30
 
+  # ---------------------------------------------------------------- macOS app (built on Linux)
   mac-app:
     name: macOS app
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
-      - name: Free disk space
+      - name: Check Unity secrets
+        run: |
+          if [ -z "$UNITY_LICENSE" ] || [ -z "$UNITY_EMAIL" ] || [ -z "$UNITY_PASSWORD" ]; then
+            echo "::error::Missing Unity secrets. Add UNITY_LICENSE, UNITY_EMAIL and UNITY_PASSWORD (see README)."
+            exit 1
+          fi
+
+      - name: Free disk space (Unity images are large)
         uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: false
@@ -75,16 +101,20 @@ jobs:
           haskell: true
           large-packages: false
           swap-storage: false
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           lfs: false
-      - uses: actions/cache@v4
+
+      - name: Cache Unity Library
+        uses: actions/cache@v4
         with:
           path: Library
           key: Library-macOS-${{ hashFiles('Assets/**', 'Packages/**', 'ProjectSettings/**') }}
           restore-keys: |
             Library-macOS-
+
       - name: Build macOS app with Unity
         uses: game-ci/unity-builder@v4
         with:
@@ -94,12 +124,15 @@ jobs:
           buildMethod: Apogee.EditorTools.BuildScript.BuildMacCI
           versioning: None
           customParameters: ${{ inputs.development && '-apogeeDev' || '' }}
+
+      # Pack as tar so the app's executable permissions survive the artifact upload.
       - name: Pack app
         run: |
           APP=$(sudo find build/StandaloneOSX -maxdepth 2 -name "*.app" -type d | head -n 1)
           if [ -z "$APP" ]; then echo "::error::No .app produced"; exit 1; fi
           sudo tar -czf Apogee-mac.tar.gz -C "$(dirname "$APP")" "$(basename "$APP")"
           sudo chown "$USER" Apogee-mac.tar.gz
+
       - uses: actions/upload-artifact@v4
         with:
           name: mac-app-raw
@@ -107,8 +140,33 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  # ---------------------------------------------------------------- macOS DMG (needs a Mac runner)
   mac-dmg:
     name: macOS DMG
     needs: mac-app
     runs-on: macos-latest
     timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-app-raw
+
+      - name: Sign (ad-hoc) and create DMG
+        run: |
+          tar -xzf Apogee-mac.tar.gz
+          APP=$(ls -d *.app | head -n 1)
+          chmod +x "$APP"/Contents/MacOS/*
+          xattr -cr "$APP"
+          # Apple Silicon only runs signed code; an ad-hoc signature is enough for your own Mac.
+          codesign --force --deep --sign - "$APP"
+          mkdir dmg
+          cp -R "$APP" dmg/
+          ln -s /Applications dmg/Applications
+          hdiutil create -volname "Apogee" -srcfolder dmg -ov -format UDZO Apogee.dmg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Apogee-macOS-DMG
+          path: Apogee.dmg
+          if-no-files-found: error
+          retention-days: 30
