@@ -142,6 +142,7 @@ namespace Apogee.Flight
             camGo.AddComponent<AudioListener>();
 
             StackOverlay(space.cam, cam);
+            PostFX.Apply(space.cam, cam);
 
             var lightGo = new GameObject("Sun");
             sun = lightGo.AddComponent<Light>();
@@ -517,6 +518,7 @@ namespace Apogee.Flight
             UpdateParts(dt);
             UpdateFlames(dt);
             UpdateDebris();
+            UpdateStation();
             UpdateCamera(dt, up);
 
             // atmosphere colour and light: blue sky by day at the ground, fading to black with altitude
@@ -579,6 +581,20 @@ namespace Apogee.Flight
                 if (go == null) continue;
                 var p = vessel.state.byUid[uid];
                 var d = p.Def;
+                if (d.IsEngine && !d.isRcs && d.gimbalRange > 0f)
+                {
+                    // gimbal: rotate the engine about its mount (top), opposite to the turn it produces
+                    PartPose pose;
+                    if (vessel.poses.TryGetValue(uid, out pose))
+                    {
+                        float on; vessel.engineOutput.TryGetValue(uid, out on);
+                        var g = vessel.gimbalCmd * d.gimbalRange * (on > 0.01f ? 1f : 0.15f);
+                        var q = Quaternion.Euler(-g.x, 0f, -g.z);
+                        var top = pose.position + pose.rotation * new Vector3(0f, PartDims.Of(p).height * 0.5f, 0f);
+                        go.transform.localRotation = q * pose.rotation;
+                        go.transform.localPosition = top + q * (pose.position - top);
+                    }
+                }
                 LegRig rig;
                 if (legs.TryGetValue(uid, out rig))
                 {
@@ -732,6 +748,12 @@ namespace Apogee.Flight
 
         void UpdateCamera(float dt, Vector3 up)
         {
+            UpdateCameraPose(dt, up);
+            Shake(cam.transform);
+        }
+
+        void UpdateCameraPose(float dt, Vector3 up)
+        {
             camDistance = Mathf.Lerp(camDistance, camDistanceGoal, 1f - Mathf.Exp(-dt * 6f));
             var t = cam.transform;
             switch (camMode)
@@ -781,6 +803,22 @@ namespace Apogee.Flight
             }
         }
 
+        /// <summary>Rumble: strongest at ignition near the ground and through max-Q, gone in vacuum.</summary>
+        void Shake(Transform t)
+        {
+            float thrust = 0f;
+            foreach (var o in vessel.engineOutput.Values) thrust = Mathf.Max(thrust, o);
+            var b = vessel.body;
+            float pr = b.HasAtmosphere ? Mathf.Clamp01((float)b.atmosphere.PressureAtm(System.Math.Max(0, vessel.Altitude))) : 0f;
+            float ground = vessel.Grounded || vessel.Altitude < 1500 ? 1f : 0f;
+            float amp = thrust * (0.25f * pr + 0.6f * ground * pr) + Mathf.Clamp01((float)(vessel.dynamicPressure / 45000.0)) * 0.35f;
+            if (amp < 0.005f) return;
+            float tt = Time.time * 22f;
+            var n = new Vector3(Mathf.PerlinNoise(tt, 0.1f) - 0.5f, Mathf.PerlinNoise(0.3f, tt) - 0.5f, Mathf.PerlinNoise(tt, tt * 0.7f) - 0.5f);
+            if (camMode == CamMode.Cockpit) t.rotation = t.rotation * Quaternion.Euler(n * amp * 3f);
+            else t.position += t.rotation * n * amp * Mathf.Clamp(camDistance * 0.02f, 0.2f, 3f) * (camMode == CamMode.LaunchCam ? 0.4f : 1f);
+        }
+
         Quaternion horizonFrame = Quaternion.identity;
         bool horizonInit;
 
@@ -807,6 +845,48 @@ namespace Apogee.Flight
                 PartInstance p;
                 return vessel.state.byUid.TryGetValue(vessel.state.controlUid, out p) && vessel.state.alive.Contains(p.uid) && p.Def.crew > 0;
             }
+        }
+
+        // ------------------------------------------------------------------ space station
+
+        Transform stationRoot;
+
+        void UpdateStation()
+        {
+            var st = vessel.station;
+            if (st == null) return;
+            if (stationRoot == null)
+            {
+                stationRoot = new GameObject("Space Station").transform;
+                foreach (var p in st.bp.parts)
+                {
+                    PartPose pose;
+                    if (!st.poses.TryGetValue(p.uid, out pose)) continue;
+                    var model = PartMeshFactory.Get(p);
+                    var go = new GameObject("Station_" + p.partId);
+                    go.transform.SetParent(stationRoot, false);
+                    go.transform.localPosition = pose.position;
+                    go.transform.localRotation = pose.rotation;
+                    go.AddComponent<MeshFilter>().sharedMesh = model.mesh;
+                    var r = go.AddComponent<MeshRenderer>();
+                    r.sharedMaterials = model.materials;
+                    r.shadowCastingMode = ShadowCastingMode.On;
+                    PartPaint.Apply(r, model.materialKeys, p.paint, new MaterialPropertyBlock());
+                }
+                // navigation lights so it can be spotted against the dark
+                var beacon = new GameObject("Beacon").AddComponent<Light>();
+                beacon.transform.SetParent(stationRoot, false);
+                beacon.type = LightType.Point;
+                beacon.color = new Color(1f, 0.35f, 0.3f);
+                beacon.range = 25f;
+                beacon.intensity = 2f;
+            }
+            var rel = st.pos - vessel.pos;
+            bool show = st.body == vessel.body && rel.magnitude < 40000;
+            if (stationRoot.gameObject.activeSelf != show) stationRoot.gameObject.SetActive(show);
+            if (!show) return;
+            stationRoot.position = rel.ToFloat();
+            stationRoot.rotation = st.rot;
         }
 
         public void HideVessel()

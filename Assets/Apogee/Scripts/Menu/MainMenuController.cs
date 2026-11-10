@@ -1,5 +1,6 @@
 using System.Collections;
 using Apogee.Core;
+using Apogee.Game;
 using Apogee.Rendering;
 using Apogee.Rocket;
 using Apogee.UI;
@@ -12,7 +13,7 @@ namespace Apogee.Menu
     /// <summary>
     /// Main menu: a slowly turning rocket in Earth orbit with a procedurally generated Earth (clouds,
     /// ocean glint, night-side city lights, atmospheric rim), the Moon, a star field and the sun, behind
-    /// the game's menu. Locked modes are clearly labelled with the roadmap phase that delivers them.
+    /// the game menu: sandbox, career, missions, space station, planet explorer and cheats.
     /// </summary>
     public class MainMenuController : MonoBehaviour
     {
@@ -276,7 +277,7 @@ namespace Apogee.Menu
                 col.anchorMax = new Vector2(1, 0);
                 col.pivot = new Vector2(0.5f, 0);
                 col.offsetMin = new Vector2(60, 90);
-                col.offsetMax = new Vector2(-60, 90 + 760);
+                col.offsetMax = new Vector2(-60, 90 + 840);
             }
             else
             {
@@ -302,36 +303,40 @@ namespace Apogee.Menu
             bool hasAutosave = SaveSystem.HasAutosave();
             MenuButton(col, "Sandbox Mode", hasAutosave ? "Continue your last design with unlimited parts" : "Unlimited parts — build anything", ButtonStyle.Primary, () =>
             {
+                Play.Reset();
                 Session.builderEntry = BuilderEntry.Continue;
                 AppRoot.Instance.LoadScene(Scenes.Builder);
             });
             MenuButton(col, "Spacecraft Designer", "Start a fresh design on an empty platform", ButtonStyle.Normal, () =>
             {
+                Play.Reset();
                 Session.builderEntry = BuilderEntry.NewDesign;
                 AppRoot.Instance.LoadScene(Scenes.Builder);
             });
             MenuButton(col, "Saved Designs", "Open, or delete, rockets saved on this device", ButtonStyle.Normal, OpenSaved);
-            MenuButton(col, "Settings", "Graphics, audio and controls", ButtonStyle.Normal, OpenSettings);
+            MenuButton(col, "Settings", "Graphics, audio, controls and cheats", ButtonStyle.Normal, OpenSettings);
 
             var gap2 = UIFactory.Rect("Gap", col);
-            UIFactory.Size(gap2, -1, 14);
-            var soon = UIFactory.Label(col, "IN DEVELOPMENT", 20, Theme.Muted, TextAnchor.MiddleLeft, FontStyle.Bold);
+            UIFactory.Size(gap2, -1, 8);
+            var soon = UIFactory.Label(col, "GAME MODES", 20, Theme.Muted, TextAnchor.MiddleLeft, FontStyle.Bold);
             UIFactory.Size(soon, -1, 30);
-            var grid = UIFactory.Rect("Locked", col);
-            UIFactory.Size(grid, -1, 130);
+            var grid = UIFactory.Rect("Modes", col);
+            UIFactory.Size(grid, -1, 200);
             var g = grid.gameObject.AddComponent<GridLayoutGroup>();
             g.cellSize = portrait ? new Vector2(470, 58) : new Vector2(300, 58);
             g.spacing = new Vector2(12, 12);
-            Locked(grid, "New Career", 5, "Career mode (research, budget, tech tree) is planned for Phase 5.");
-            Locked(grid, "Mission Mode", 5, "Structured missions — from first launch to Mars — are planned for Phase 5.");
-            Locked(grid, "Space Station", 4, "Docking arrives in Phase 4 and station building in Phase 5.");
-            Locked(grid, "Planet Explorer", 3, "Orbital flight, the Moon and the navigation map arrive in Phase 3.");
+            var pr = Progress.Current;
+            Mode(grid, pr.careerStarted ? "Career · " + Costs.Money(pr.funds) : "New Career", GameModesUI.OpenCareer);
+            Mode(grid, "Missions · " + pr.missionsDone.Count + "/" + Mission.All.Count, GameModesUI.OpenMissions);
+            Mode(grid, "Space Station", GameModesUI.OpenStation);
+            Mode(grid, "Planet Explorer", GameModesUI.OpenExplorer);
+            Mode(grid, "Cheats", () => GameModesUI.OpenCheats(), true);
 
             status = UIFactory.Label(root, "", 20, Theme.Muted, TextAnchor.LowerRight);
             if (portrait) status.alignment = TextAnchor.LowerCenter;
             UIFactory.Place(status.rectTransform, portrait ? new Vector2(0.5f, 0) : new Vector2(1, 0), portrait ? new Vector2(0.5f, 0) : new Vector2(1, 0),
                 portrait ? new Vector2(0, 52) : new Vector2(-30, 24), new Vector2(portrait ? 1000 : 900, 40));
-            var ver = UIFactory.Label(root, "Phase 4 build  ·  v" + Application.version, 18, Theme.Muted, TextAnchor.LowerLeft);
+            var ver = UIFactory.Label(root, "Phase 5 · v" + Application.version, 18, Theme.Muted, TextAnchor.LowerLeft);
             UIFactory.Place(ver.rectTransform, new Vector2(0, 0), new Vector2(0, 0), new Vector2(30, 24), new Vector2(600, 36));
         }
 
@@ -346,11 +351,10 @@ namespace Apogee.Menu
             text.rectTransform.offsetMin = new Vector2(28, 6);
         }
 
-        void Locked(RectTransform parent, string label, int phase, string message)
+        void Mode(RectTransform parent, string label, System.Action open, bool warn = false)
         {
-            var b = UIFactory.Button(parent, label + "  ·  Phase " + phase, () => AppRoot.Instance.Dialogs.Toast(message, Theme.Accent, 3.2f), ButtonStyle.Ghost, 21);
-            var text = b.GetComponentInChildren<Text>();
-            text.color = Theme.Muted;
+            var b = UIFactory.Button(parent, label, () => open(), ButtonStyle.Normal, 22);
+            if (warn) b.GetComponentInChildren<Text>().color = Theme.Warn;
         }
 
         void OpenSaved()

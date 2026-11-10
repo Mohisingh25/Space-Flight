@@ -37,23 +37,7 @@ namespace Apogee.UI
             UIFactory.Size(ctl, -1, 52);
 
             UIFactory.Header(c, "Cheats");
-            var warn = UIFactory.Label(c, "Off = real physics. Cheats apply only while the master switch is on.", 19, Theme.Muted);
-            UIFactory.Size(warn, -1, 34);
-            UIFactory.ToggleRow(c, "Enable cheats", s.cheatsEnabled, on => { s.cheatsEnabled = on; s.Save(); });
-            UIFactory.ToggleRow(c, "Unlimited fuel", s.cheatInfiniteFuel, on => { s.cheatInfiniteFuel = on; s.Save(); });
-            UIFactory.ToggleRow(c, "Zero gravity", s.cheatNoGravity, on => { s.cheatNoGravity = on; s.Save(); });
-            UIFactory.ToggleRow(c, "No air drag", s.cheatNoDrag, on => { s.cheatNoDrag = on; s.Save(); });
-            UIFactory.ToggleRow(c, "Unbreakable parts (no crashes)", s.cheatUnbreakable, on => { s.cheatUnbreakable = on; s.Save(); });
-            UIFactory.ToggleRow(c, "Super thrust (5× engines)", s.cheatSuperThrust, on => { s.cheatSuperThrust = on; s.Save(); });
-            UIFactory.ToggleRow(c, "No re-entry heat damage", s.cheatNoHeat, on => { s.cheatNoHeat = on; s.Save(); });
-            Button startBtn = null;
-            startBtn = UIFactory.Button(c, "Start: " + GameSettings.StartNames[Mathf.Clamp(s.cheatStart, 0, 3)], () =>
-            {
-                s.cheatStart = (s.cheatStart + 1) % GameSettings.StartNames.Length;
-                s.Save();
-                UIFactory.SetLabel(startBtn, "Start: " + GameSettings.StartNames[s.cheatStart]);
-            });
-            UIFactory.Size(startBtn, -1, 70);
+            GameModesUI.BuildCheats(c, null, null);
 
             UIFactory.Header(c, "Credits");
             var cr = UIFactory.Label(c, "Planet maps: Solar System Scope (solarsystemscope.com), CC BY 4.0, based on NASA imagery and data.", 19, Theme.Muted);

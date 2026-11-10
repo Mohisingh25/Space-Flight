@@ -138,6 +138,7 @@ namespace Apogee.Parts
         // Electrical / other (used by later phases, displayed in the builder now)
         public float batteryKWh;
         public float solarKW;
+        public float generatorKW;          // constant electrical output (RTG)
         public float antennaRangeKm;
 
         public bool IsEngine { get { return thrustVac > 0f && !isRcs; } }

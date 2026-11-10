@@ -163,6 +163,7 @@ namespace Apogee.Flight
         readonly FlightHUD hud;
         readonly Dictionary<CelestialBody, Text> labels = new Dictionary<CelestialBody, Text>();
         Text shipLabel, apLabel, peLabel;
+        readonly Dictionary<LandingSite, Text> siteLabels = new Dictionary<LandingSite, Text>();
         readonly List<Text> encounterLabels = new List<Text>();
         public List<Patch> prediction = new List<Patch>();
         float predictTimer;
@@ -180,6 +181,8 @@ namespace Apogee.Flight
                 btn.onClick.AddListener(() => Focus(body));
                 labels[b] = t;
             }
+            foreach (var site in LandingSite.All)
+                siteLabels[site] = hud.MakeMapLabel("x " + site.name, new Color(1f, 0.85f, 0.35f));
             shipLabel = hud.MakeMapLabel("▲ You", new Color(0.4f, 1f, 0.6f));
             apLabel = hud.MakeMapLabel("Ap", new Color(0.45f, 0.8f, 1f));
             peLabel = hud.MakeMapLabel("Pe", new Color(0.45f, 0.8f, 1f));
@@ -253,6 +256,17 @@ namespace Apogee.Flight
                 var b = kv.Key;
                 bool relevant = b == focus || b.parent == focus || b == focus.parent || (b.parent != null && b.parent == focus.parent) || (focus.star && b.parent == focus);
                 Place(kv.Value, b.AbsolutePosition(t), relevant);
+            }
+            foreach (var kv in siteLabels)
+            {
+                var b = SolarSystem.Get(kv.Key.body);
+                bool show = b != null && b == focus;
+                if (!show) { if (kv.Value.gameObject.activeSelf) kv.Value.gameObject.SetActive(false); continue; }
+                var dirFixed = b.SurfaceDirection(kv.Key.lat, kv.Key.lon, t);
+                // only label sites on the side facing the camera
+                var abs = b.AbsolutePosition(t) + dirFixed * b.radius;
+                var toCam = (camAbs - abs).normalized;
+                Place(kv.Value, abs, Vector3d.Dot(dirFixed, toCam) > 0.05);
             }
             var vesselAbs = vessel.body.AbsolutePosition(t) + vessel.pos;
             Place(shipLabel, vesselAbs, true);

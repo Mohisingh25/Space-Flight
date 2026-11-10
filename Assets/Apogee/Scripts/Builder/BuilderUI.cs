@@ -248,8 +248,20 @@ namespace Apogee.Builder
             foreach (var kv in categoryButtons) UIFactory.SetButtonColor(kv.Value, kv.Key == category ? Theme.ButtonPrimary : new Color(0.1f, 0.14f, 0.19f, 0.9f));
             for (int i = partsContent.childCount - 1; i >= 0; i--) Destroy(partsContent.GetChild(i).gameObject);
             thumbs.Clear();
+            bool careerLock = Apogee.Game.Play.Career && !AppRoot.Instance.Settings.cheatUnlockAll;
+            if (careerLock)
+            {
+                int hidden = 0;
+                foreach (var def in PartCatalog.InCategory(category)) if (!Apogee.Game.Progress.Current.PartUnlocked(def.id)) hidden++;
+                if (hidden > 0)
+                {
+                    var lk = UIFactory.Label(partsContent, hidden + " more in this category — research them in Career ▸ Research", 18, Theme.Muted);
+                    UIFactory.Size(lk, -1, 48);
+                }
+            }
             foreach (var def in PartCatalog.InCategory(category))
             {
+                if (careerLock && !Apogee.Game.Progress.Current.PartUnlocked(def.id)) continue;
                 var item = UIFactory.Panel(partsContent, Theme.PanelLight, true, "Item_" + def.id);
                 item.sprite = UIFactory.RoundedSmall;
                 float itemH = portrait ? 100f : 112f, thumb = portrait ? 84f : 96f;
@@ -631,6 +643,9 @@ namespace Apogee.Builder
             Row("Dry mass", s.dryMass.ToString("N2") + " t");
             Row("Propellant", s.fuelMass.ToString("N2") + " t");
             Row("Height", s.height.ToString("0.0") + " m");
+            float cost = Apogee.Game.Costs.Rocket(c.Bp);
+            if (Apogee.Game.Play.Career) Row("Cost / funds", Apogee.Game.Costs.Money(cost) + " / " + Apogee.Game.Costs.Money(Apogee.Game.Progress.Current.funds), cost <= Apogee.Game.Progress.Current.funds ? Theme.Good : Theme.Bad);
+            else Row("Cost", Apogee.Game.Costs.Money(cost));
             if (s.crew > 0) Row("Crew", s.crew.ToString());
 
             UIFactory.Header(statsContent, "Propulsion");

@@ -27,10 +27,26 @@ namespace Apogee.Core
         // Cheats: only active when the master switch is on.
         public bool cheatsEnabled;
         public bool cheatInfiniteFuel, cheatNoGravity, cheatNoDrag, cheatUnbreakable, cheatSuperThrust;
-        public bool cheatNoHeat;
+        public bool cheatNoHeat, cheatInfinitePower, cheatNoGLimit, cheatFreeLaunch, cheatUnlockAll;
+        public bool cheatsV2;           // cheats are individual switches (no master switch)
         public int cheatStart;          // 0 launch pad, 1 Earth orbit, 2 lunar orbit, 3 Mars orbit
 
         public static readonly string[] StartNames = { "Launch pad (normal)", "Low Earth orbit (250 km)", "Lunar orbit (100 km)", "Mars orbit (300 km)" };
+
+        public void ClearCheats()
+        {
+            cheatInfiniteFuel = cheatNoGravity = cheatNoDrag = cheatUnbreakable = cheatSuperThrust = cheatNoHeat = false;
+            cheatInfinitePower = cheatNoGLimit = cheatFreeLaunch = cheatUnlockAll = false;
+            cheatStart = 0;
+        }
+
+        /// <summary>Copies the switches onto a flight's live cheat set.</summary>
+        public void ApplyCheats(Apogee.Flight.FlightCheats c)
+        {
+            c.infiniteFuel = cheatInfiniteFuel; c.noGravity = cheatNoGravity; c.noDrag = cheatNoDrag;
+            c.unbreakable = cheatUnbreakable; c.superThrust = cheatSuperThrust; c.noHeat = cheatNoHeat;
+            c.infinitePower = cheatInfinitePower; c.noGLimit = cheatNoGLimit;
+        }
 
         public event Action Changed;
 
@@ -44,6 +60,12 @@ namespace Apogee.Core
             }
             catch (Exception e) { Debug.LogWarning("Settings unreadable, using defaults: " + e.Message); }
             if (s == null) s = new GameSettings();
+            if (!s.cheatsV2)
+            {
+                // older versions had a master switch: if it was off, none of the cheats were really active
+                if (!s.cheatsEnabled) s.ClearCheats();
+                s.cheatsV2 = true;
+            }
             if (s.quality < 0)
             {
                 int ram = SystemInfo.systemMemorySize;

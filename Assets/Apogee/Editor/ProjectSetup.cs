@@ -18,7 +18,7 @@ namespace Apogee.EditorTools
     [InitializeOnLoad]
     public static class ProjectSetup
     {
-        public const string SetupVersion = "5";
+        public const string SetupVersion = "6";
         const string MarkerPath = "ProjectSettings/ApogeeSetup.txt";
         public const string MainMenuScene = "Assets/Scenes/MainMenu.unity";
         public const string BuilderScene = "Assets/Scenes/Builder.unity";
@@ -57,6 +57,7 @@ namespace Apogee.EditorTools
             EnsureFolder("Assets/Settings");
             EnsureFolder("Assets/Scenes");
             SetupRenderPipeline();
+            PostFXSetup.Create();
             SetupMaterials();
             SetupScenes();
             SetupPlayerSettings();

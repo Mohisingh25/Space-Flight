@@ -15,8 +15,8 @@ namespace Apogee.Flight
     /// <summary>Optional cheats (Settings → Cheats). All off by default; tests run with real physics.</summary>
     public class FlightCheats
     {
-        public bool infiniteFuel, noGravity, noDrag, unbreakable, superThrust, noHeat;
-        public bool Any { get { return infiniteFuel || noGravity || noDrag || unbreakable || superThrust || noHeat; } }
+        public bool infiniteFuel, noGravity, noDrag, unbreakable, superThrust, noHeat, infinitePower, noGLimit;
+        public bool Any { get { return infiniteFuel || noGravity || noDrag || unbreakable || superThrust || noHeat || infinitePower || noGLimit; } }
     }
 
     /// <summary>A separated piece: falls, drags and burns up or crashes on its own.</summary>
@@ -92,9 +92,21 @@ namespace Apogee.Flight
         public bool rcsFiring;
         public int nextStage;
         public bool chuteArmed;
-        public bool holdDown;           // launch clamps hold the rocket until T-0
+        public bool holdDown;
+        public Vector3 gimbalCmd;
+
+        // ---- electrical system (kWh / kW)
+        public double charge = -1, capacity, powerIn, powerOut;
+        public bool sunlit = true, powerOut0;
+        bool lowPowerWarned;        // -1..1 per axis: how hard the engines are steering (x pitch, z yaw)           // launch clamps hold the rocket until T-0
         public float chuteOpen;
         public FlightCheats cheats = new FlightCheats();
+        public Station station;                         // space station to rendezvous and dock with (Station mode)
+
+        public bool HasCommand
+        {
+            get { foreach (int u in state.alive) if (state.byUid[u].Def.isCommand) return true; return false; }
+        }
 
         // ---- per-part state
         public readonly HashSet<int> engineOff = new HashSet<int>();
@@ -162,7 +174,7 @@ namespace Apogee.Flight
         public void PlaceOnSurface(double lat, double lon, double height)
         {
             LaunchLat = lat; LaunchLon = lon;
-            var dir = body.SurfaceDirection(lat, lon, 0);           // body-fixed (spin angle 0)
+            var dir = body.FixedDirection(lat, lon);           // body-fixed (spin angle 0)
             var up = dir.ToFloat();
             double ground = body.radius + body.TerrainHeight(dir);
             fixedPos = dir * (ground + height + (comLocal.y - lowY));
@@ -234,7 +246,7 @@ namespace Apogee.Flight
         public static float MaxG(PartDefinition d)
         {
             if (d.isCommand && d.crew > 0) return 25f;
-            if (d.fuelMass > 0f && !d.solidFuel && !d.isRcs) return 20f;
+            if (d.fuelMass > 0f && !d.solidFuel && !d.isRcs) return 25f;
             if (d.isCommand) return 40f;
             if (d.IsEngine) return 60f;
             if (d.solarKW > 0f || d.shape == PartShape.Antenna) return 12f;
@@ -281,6 +293,12 @@ namespace Apogee.Flight
                 if (d.shape == PartShape.NavComputer) reactionTorque += 12f;
                 if (d.isRcs) rcsThrust += d.thrustVac;
                 finArea += d.finArea;
+            }
+            if (station != null && station.docked)
+            {
+                var sc = station.dockOffset + station.dockRot * station.com;
+                m += station.mass;
+                com += sc * station.mass;
             }
             if (m <= 0f) m = 0.001f;
             mass = m;
@@ -334,6 +352,14 @@ namespace Apogee.Flight
                 List<int> l;
                 if (!childMap.TryGetValue(par, out l)) { l = new List<int>(); childMap[par] = l; }
                 l.Add(u);
+            }
+            if (station != null && station.docked)
+            {
+                var rs = station.dockOffset + station.dockRot * station.com - comLocal;
+                float sm = station.mass, own = sm * 12f;   // station's own inertia (~ 6 m radius of gyration)
+                I.x += sm * (rs.y * rs.y + rs.z * rs.z) + own;
+                I.y += sm * (rs.x * rs.x + rs.z * rs.z) + own;
+                I.z += sm * (rs.x * rs.x + rs.y * rs.y) + own;
             }
             inertia = new Vector3(Mathf.Max(0.05f, I.x), Mathf.Max(0.02f, I.y), Mathf.Max(0.05f, I.z));
             copY = sideSum > 0f ? sideY / sideSum : comLocal.y;
@@ -617,6 +643,7 @@ namespace Apogee.Flight
             if (status == FlightStatus.Crashed || !state.alive.Contains(uid)) return null;
             var p = state.byUid[uid];
             var d = p.Def;
+            if (station != null && station.docked && station.dockedPortUid == uid) return Undock();
             if (d.IsEngine && !d.isRcs)
             {
                 if (!state.ignited.Contains(uid))
@@ -667,6 +694,51 @@ namespace Apogee.Flight
             return d.displayName + "  ·  " + PartDefinition.FormatMass(PartMass.Dry(p) + fuel) +
                 (cap > 0f ? "  ·  fuel " + Mathf.RoundToInt(100f * fuel / cap) + "%" : "") + "  ·  " + Mathf.RoundToInt(temp - 273f) + " °C";
         }
+
+        /// <summary>True when the body blocks the line from the vessel to the Sun (orbital night).</summary>
+        public bool InShadow()
+        {
+            var sunRel = -(body.AbsolutePosition(time) + pos);   // vessel → Sun
+            var dir = sunRel.normalized;
+            double along = Vector3d.Dot(-pos, dir);               // closest approach of the ray to the body's centre
+            if (along <= 0) return false;
+            var closest = pos + dir * along;
+            return closest.magnitude < body.radius;
+        }
+
+        /// <summary>
+        /// Batteries charge from deployed solar arrays (scaled by 1/distance² from the Sun, nothing in the shadow
+        /// of a planet) and RTGs; flight computers, life support and reaction wheels drain them.
+        /// </summary>
+        void UpdatePower(double dt)
+        {
+            capacity = 0;
+            double solar = 0, gen = 0, load = 0;
+            foreach (int u in state.alive)
+            {
+                var d = state.byUid[u].Def;
+                capacity += d.batteryKWh;
+                if (d.solarKW > 0f && !folded.Contains(u)) solar += d.solarKW;
+                gen += d.generatorKW;
+                if (d.isCommand) load += d.crew > 0 ? 0.15 * d.crew + 0.1 : 0.04;
+            }
+            if (charge < 0) charge = capacity;
+            sunlit = !InShadow();
+            double au = (body.AbsolutePosition(time) + pos).magnitude / SolarSystem.AU;
+            powerIn = (sunlit ? solar / Math.Max(0.05, au * au) : 0) + gen;
+            // reaction wheels and SAS draw power while they work
+            load += (Mathf.Abs(gimbalCmd.x) + Mathf.Abs(gimbalCmd.y) + Mathf.Abs(gimbalCmd.z)) * 0.25 * reactionTorque / 10.0 + (sas != SasMode.Off ? 0.02 : 0);
+            powerOut = load;
+            charge = Math.Max(0, Math.Min(capacity, charge + (powerIn - powerOut) * dt / 3600.0));
+            if (cheats.infinitePower) charge = Math.Max(capacity, 1);
+            bool dead = !cheats.infinitePower && (capacity <= 0 || charge <= 1e-6);
+            if (dead && !powerOut0) Say("Batteries flat — SAS and reaction wheels offline. Unfold solar panels or add batteries/RTG.");
+            if (!dead && charge / Math.Max(1e-6, capacity) < 0.1 && !lowPowerWarned) { lowPowerWarned = true; Say("Low power: batteries below 10%"); }
+            if (charge / Math.Max(1e-6, capacity) > 0.2) lowPowerWarned = false;
+            powerOut0 = dead;
+        }
+
+        public bool HasPower { get { return !powerOut0; } }
 
         bool SameFuel(int a, int b)
         {
@@ -782,7 +854,8 @@ namespace Apogee.Flight
         public void Advance(double dt)
         {
             UpdateTransfer(dt);
-            if (status == FlightStatus.Crashed) { time += dt; StepDebris(dt); return; }
+            UpdatePower(dt);
+            if (status == FlightStatus.Crashed) { time += dt; StepDebris(dt); if (station != null) station.Propagate(time); return; }
             if (Grounded && !(enginesOn && AnyEngineBurning() && status != FlightStatus.Rollout) && !AnySpooling())
             {
                 engineOutput.Clear();
@@ -790,6 +863,7 @@ namespace Apogee.Flight
                 time += dt;
                 SyncToSurface();
                 StepDebris(dt);
+                if (station != null) { station.Propagate(time); SyncStation(); }
                 return;
             }
             if (CanRails && status == FlightStatus.Flying && dt > 0.05)
@@ -800,6 +874,7 @@ namespace Apogee.Flight
                 spool.Clear();
                 Rails(dt);
                 StepDebris(dt);
+                if (station != null) { station.Propagate(time); SyncStation(); }
                 return;
             }
             double rem = dt;
@@ -810,6 +885,7 @@ namespace Apogee.Flight
                 rem -= h;
                 if (status == FlightStatus.Crashed) break;
             }
+            SyncStation();
             StepDebris(dt);
         }
 
@@ -993,17 +1069,21 @@ namespace Apogee.Flight
             ControlAttitude(dt, torqueBody, gimbalTorque, rho, speed);
 
             // ---------------- g-load: sustained high acceleration crushes the weakest part
-            if (!cheats.unbreakable)
+            if (!cheats.unbreakable && !cheats.noGLimit)
             {
                 double gNow = forceBody.magnitude / mass / G0;
                 int weakest = -1; float lim = float.MaxValue;
                 foreach (int u in state.alive)
                 {
-                    float m = MaxG(state.byUid[u].Def);
+                    var pd = state.byUid[u].Def;
+                    float m = MaxG(pd);
+                    // propellant head pressure is what buckles a tank: an emptying tank tolerates far more g
+                    if (pd.fuelMass > 0f && !pd.solidFuel && !pd.isRcs)
+                        m += 35f * (1f - Mathf.Clamp01(Fuel(u) / Mathf.Max(1e-4f, PartMass.Fuel(state.byUid[u]))));
                     if (m < lim) { lim = m; weakest = u; }
                 }
                 if (gNow > lim) overG += (float)dt; else overG = 0f;
-                if (overG > 0.3f && weakest >= 0)
+                if (overG > 1.5f && weakest >= 0)
                 {
                     overG = 0f;
                     DestroyPart(weakest, state.byUid[weakest].Def.displayName + " crushed at " + gNow.ToString("0") + " g (limit " + lim.ToString("0") + " g)");
@@ -1040,7 +1120,104 @@ namespace Apogee.Flight
 
             GroundContact();
             CheckSoi();
+            if (station != null) { station.StepPhysics(dt); CheckDocking(); }
         }
+
+        // ------------------------------------------------------------------ rendezvous & docking
+
+        double dockWarnAt = -1e9;
+
+        public bool PortFace(int u, out Vector3 point, out Vector3 axis)
+        {
+            var p = state.byUid[u];
+            var pose = Pose(u);
+            axis = pose.rotation * (p.mode == AttachMode.Below ? Vector3.down : Vector3.up);
+            point = pose.position + axis * PartDims.Of(p).height * 0.5f;
+            return true;
+        }
+
+        void CheckDocking()
+        {
+            if (station.docked || station.body != body || time - station.undockedAt < 5) return;
+            var rel = station.pos - pos;
+            if (rel.magnitude > 60) return;
+            foreach (int u in state.alive)
+            {
+                if (!state.byUid[u].Def.isDockingPort) continue;
+                Vector3 pl, al;
+                PortFace(u, out pl, out al);
+                var pw = pos + (Vector3d)(rot * (pl - comLocal));
+                double d = (pw - station.PortWorld).magnitude;
+                if (d > 1.0) continue;
+                double rv = (vel - station.vel).magnitude;
+                float align = Vector3.Dot(rot * al, station.PortAxisWorld);
+                if (rv > 0.6 || align > -0.94f)
+                {
+                    if (time - dockWarnAt > 3)
+                    {
+                        dockWarnAt = time;
+                        Say(rv > 0.6 ? "Bump! Too fast to dock (" + rv.ToString("0.0") + " m/s) — approach below 0.6 m/s" : "Ports not lined up — point the docking port straight at the station's port");
+                    }
+                    // gentle contact: bounce apart
+                    var n = (pw - station.PortWorld).normalized;
+                    double into = Vector3d.Dot(vel - station.vel, -n);
+                    if (into > 0) vel += n * (into * 1.5);
+                    continue;
+                }
+                Dock(u, pl, al);
+                return;
+            }
+        }
+
+        void Dock(int u, Vector3 pl, Vector3 al)
+        {
+            // snap the station so the two docking faces meet, axes opposed
+            var vAxisW = rot * al;
+            var stRot = Quaternion.FromToRotation(station.PortAxisWorld, -vAxisW) * station.rot;
+            var pw = pos + (Vector3d)(rot * (pl - comLocal));
+            var stOrigin = pw - (Vector3d)(stRot * station.portPoint);
+            // momentum is conserved
+            double m1 = mass, m2 = station.mass;
+            vel = (vel * m1 + station.vel * m2) / (m1 + m2);
+            angVel *= (float)(m1 / (m1 + m2));
+            station.docked = true;
+            station.dockedPortUid = u;
+            station.dockRot = Quaternion.Inverse(rot) * stRot;
+            station.dockOffset = comLocal + Quaternion.Inverse(rot) * (stOrigin - pos).ToFloat();
+            station.rot = stRot;
+            var oldCom = comLocal;
+            Recalc();
+            pos += (Vector3d)(rot * (comLocal - oldCom));
+            SyncStation();
+            Say("Docked with the station! Tap your docking port to undock.");
+        }
+
+        string Undock()
+        {
+            Vector3 pl, al;
+            PortFace(station.dockedPortUid, out pl, out al);
+            var axisW = (Vector3d)(rot * al);
+            SyncStation();
+            double m1 = mass - station.mass, m2 = station.mass;
+            station.Release(station.pos, vel + axisW * (0.3 * m1 / (m1 + m2)), time);
+            vel -= axisW * (0.3 * m2 / (m1 + m2));
+            station.dockedPortUid = -1;
+            var oldCom = comLocal;
+            Recalc();
+            pos += (Vector3d)(rot * (comLocal - oldCom));
+            return "Undocked from the station";
+        }
+
+        void SyncStation()
+        {
+            if (station == null || !station.docked) return;
+            station.body = body;
+            station.rot = rot * station.dockRot;
+            station.pos = pos + (Vector3d)(rot * (station.dockOffset - comLocal));
+            station.vel = vel;
+        }
+
+        public double StationDistance { get { return station != null && station.body == body ? (station.pos - pos).magnitude : -1; } }
 
         static Quaternion Normalize(Quaternion q)
         {
@@ -1063,6 +1240,8 @@ namespace Apogee.Flight
         {
             bool surface = Altitude < (body.HasAtmosphere ? body.atmosphere.height : body.radius * 0.05);
             var v = surface ? SurfaceVelocity : vel;
+            // near the station, prograde/retrograde follow the velocity relative to it (for matching speed)
+            if (station != null && !station.docked && station.body == body && (station.pos - pos).magnitude < 5000) v = vel - station.vel;
             if (v.magnitude < 0.5 && (sas == SasMode.Prograde || sas == SasMode.Retrograde)) return Up;
             var up = Up;
             var n = Vector3d.Cross(pos, vel).normalized;
@@ -1076,6 +1255,11 @@ namespace Apogee.Flight
                 case SasMode.AntiNormal: return -n;
                 case SasMode.Target:
                 case SasMode.AntiTarget:
+                    if (target == null && station != null && !station.docked && station.body == body)
+                    {
+                        var sp = station.pos - pos;
+                        return sas == SasMode.Target ? sp.normalized : -sp.normalized;
+                    }
                     if (target == null) return null;
                     var tp = TargetRelativePosition();
                     return sas == SasMode.Target ? tp.normalized : -tp.normalized;
@@ -1100,7 +1284,9 @@ namespace Apogee.Flight
         {
             // Control authority: reaction wheels + gimbals + RCS + fins in the airflow (kN·m)
             float aero = (float)(0.5 * rho * speed * speed * finArea * 0.25 * Math.Max(1.0, length * 0.4) / 1000.0);
-            float ctl = reactionTorque + (float)gimbalTorque + (rcsOn ? rcsTorque : 0f) + aero;
+            float wheels = HasPower ? reactionTorque : 0f;
+            float ctl = wheels + (float)gimbalTorque + (rcsOn ? rcsTorque : 0f) + aero;
+            if (ctl < 1e-3f) ctl = 1e-3f;
             var maxAcc = new Vector3(ctl / inertia.x, ctl * 0.6f / inertia.y, ctl / inertia.z);
             float maxRate = 0.6f;
 
@@ -1111,7 +1297,7 @@ namespace Apogee.Flight
             bool manual = Mathf.Abs(pitchInput) > 0.01f || Mathf.Abs(yawInput) > 0.01f || Mathf.Abs(rollInput) > 0.01f;
             if (manual)
                 desired = new Vector3(pitchInput, rollInput, yawInput) * maxRate;
-            else if (sas == SasMode.Off)
+            else if (sas == SasMode.Off || !HasPower)
                 desired = angVel;
             else
             {
@@ -1133,12 +1319,16 @@ namespace Apogee.Flight
                     }
                 }
             }
+            var cmd = Vector3.zero;
             for (int k = 0; k < 3; k++)
             {
                 float err = desired[k] - angVel[k];
                 float step = maxAcc[k] * (float)dt;
                 angVel[k] += Mathf.Clamp(err, -step, step);
+                cmd[k] = Mathf.Clamp(err / Mathf.Max(1e-4f, maxAcc[k] * 0.25f), -1f, 1f);
             }
+            // engine bells swivel to make the turn (also counter off-centre thrust)
+            gimbalCmd = Vector3.Lerp(gimbalCmd, cmd, Mathf.Clamp01((float)dt * 8f));
         }
 
         // =====================================================================================
@@ -1230,11 +1420,16 @@ namespace Apogee.Flight
                 var p = state.byUid[u];
                 if (p.parentUid < 0 || !state.alive.Contains(p.parentUid)) Accumulate(u, aBody, dragShare);
             }
+            if (breakCandidate == null) { overload = 0f; return; }
+            overload += (float)dt;
+            if (overload < 0.25f) return;   // momentary spikes (ignition, staging) don't snap joints
+            overload = 0f;
             if (breakCandidate != null)
                 BreakJoint(breakCandidate, "Structural failure: " + breakCandidate.Def.displayName + " tore off (" + Mathf.RoundToInt(breakLoad) + " kN on a " + Mathf.RoundToInt(breakStrength) + " kN joint)");
         }
 
         PartInstance breakCandidate;
+        float overload;
         float breakLoad, breakStrength;
         Dictionary<int, List<int>> childMap = new Dictionary<int, List<int>>();
 
@@ -1292,13 +1487,21 @@ namespace Apogee.Flight
             float dc = child.mode == AttachMode.Above ? cd.bottomEnd : cd.topEnd;
             float dp = child.mode == AttachMode.Above ? pd.topEnd : pd.bottomEnd;
             float d = Mathf.Max(0.3f, Mathf.Min(dc, dp));
+            float geo;
             switch (child.mode)
             {
-                case AttachMode.Surface: return 120f + 400f * cd.diameter * cd.diameter;
-                case AttachMode.Flank: return 900f * d * d;
-                case AttachMode.Side: return 1100f * d * d;
-                default: return 1500f * d * d;
+                case AttachMode.Surface: geo = 120f + 400f * cd.diameter * cd.diameter; break;
+                case AttachMode.Flank: geo = 900f * d * d; break;
+                case AttachMode.Side: geo = 1100f * d * d; break;
+                default: geo = 1500f * d * d; break;
             }
+            // Engine and booster mounts are built for the thrust they carry (thrust structure, ~1.5× safety factor).
+            // Only a sensibly sized mount gets that rating: a huge engine bolted under a tiny tank still tears off.
+            float rated = 0f;
+            bool radial = child.mode == AttachMode.Surface || child.mode == AttachMode.Side || child.mode == AttachMode.Flank;
+            if (child.Def.IsEngine && (radial || cd.diameter <= pd.diameter * 1.3f)) rated = Mathf.Max(rated, child.Def.thrustVac);
+            if (parent.Def.IsEngine && pd.diameter <= cd.diameter * 1.3f) rated = Mathf.Max(rated, parent.Def.thrustVac);
+            return Mathf.Max(geo, rated * 1.5f);
         }
 
         HashSet<int> Subtree(int uid)

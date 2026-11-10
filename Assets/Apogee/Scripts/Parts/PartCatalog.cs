@@ -554,7 +554,7 @@ namespace Apogee.Parts
                 id = "rtg", displayName = "Radioisotope Generator",
                 description = "RTG: steady power for decades, day or night, far from the Sun.",
                 category = PartCategory.Utility, shape = PartShape.Rtg,
-                diameter = 0.6f, topDiameter = 0.6f, height = 1.1f, dryMass = 0.08f, solarKW = 0f, batteryKWh = 0.3f,
+                diameter = 0.6f, topDiameter = 0.6f, height = 1.1f, dryMass = 0.08f, solarKW = 0f, batteryKWh = 0.3f, generatorKW = 0.11f,
                 radialMount = true, stackOnly = false, hasTopNode = false, hasBottomNode = false
             });
             Add(new PartDefinition

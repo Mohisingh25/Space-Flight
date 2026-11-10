@@ -10,6 +10,25 @@ the project, mobile rendering setup, main menu and a working modular rocket buil
 
 ---
 
+## Phase 5 — full game: career, missions, space station, planet explorer, cheats
+
+**Game modes (main menu ▸ GAME MODES)**
+- **Career** — run a space agency: start with $600k and basic parts. Accept contracts (18 of them, from *First Flight* to *Titan Landing*) for money, science and reputation. Spend science in the **Research** tree (12 nodes) to unlock parts; the builder only lists researched parts and shows the rocket's cost against your funds. Launches cost money; capsules that land back on Earth are recovered for 85 % of their value.
+- **Missions** — the same 18 objectives with every part available. Each mission can be flown with a suggested rocket, opened in the builder to edit first, or flown with your own design. Objectives are tracked live in the flight HUD, step by step.
+- **Space Station** — a station in a 400 km orbit. Rendezvous and dock (port to port, under 0.6 m/s, lined up within ~20°). Every docking delivers a module, up to 9. Near the station, Pro/Retro follow your speed relative to it and **Tgt** points at it; the HUD shows distance, relative speed and closing/opening. There's also a docking-practice start 120 m behind the station.
+- **Planet Explorer** — start on the surface at a real landing site (Tranquility Base, Shackleton, Copernicus, Jezero, Gale, Huygens on Titan) or in low orbit around any planet or moon, with real facts for each world (gravity, escape speed, atmosphere, day length). Landing within 25 km of a site logs it.
+- **Cheats** — its own panel (main menu, Settings, and the in-flight pause menu). Every cheat is a separate switch that applies immediately, even mid-flight: unlimited fuel, zero gravity, no drag, 5× thrust, unlimited electricity, zero damage, no overheating, no g-force limit, free launches, all parts unlocked, start position.
+
+**New example rockets:** Selene Moon Rocket (5-stage, ≈19.5 km/s, lands on the Moon and returns), Selene Lander, Ares Mars Hopper, Station Shuttle, Docking Tug.
+
+**Realism fixes**
+- Rockets with many engines no longer tear themselves apart: engine mounts are rated for their engine's thrust (×1.5 safety factor), and only short spikes are ignored. A huge engine on a tiny tank still breaks.
+- Emptying tanks tolerate more g (propellant pressure is what buckles a full tank).
+- Electrical system: solar power falls off with distance from the Sun and drops to zero in a planet's shadow; RTGs give constant power; flat batteries switch off SAS and reaction wheels.
+- Engines visibly gimbal (swivel) when you steer.
+- Latitude/longitude and downrange distance are now correct everywhere, and the launch pad sits on its real spot on the Earth map (an offset in surface placement was fixed). Landing sites show distance and bearing in the HUD.
+- Cinematic post-processing (bloom, ACES tone mapping, vignette) and camera shake at launch and Max-Q.
+
 ## Phase 4.2 — fixes
 
 - Engines switched off really stop (thrust, flame and sound); engines spool up over ~2 s and cut off in a fraction of a second, like real turbopump engines.
@@ -150,10 +169,7 @@ ascent Δv. Example results: *Meridian Orbital* has 10.4 km/s of vacuum Δv and 
 *Pathfinder I* reaches ≈138 km.
 
 ## Not done yet (by phase)
-- **Phase 2 — Flight (remaining):** launch countdown, cockpit/chase camera options, re-entry heating.
-- **Phase 3 — Space:** floating-origin double-precision orbital integration, Earth and Moon at scale, navigation map, manoeuvre nodes, transfers.
-- **Phase 4 — Advanced:** interactive cockpit, astronaut EVA, docking, landing, reusable boosters.
-- **Phase 5 — Full game:** Mars and other planets, missions, career, stations, satellites.
+- **Still to come:** astronaut EVA, drivable rovers, manoeuvre nodes, multiple vessels in flight at once (besides the station), reusable boosters.
 - **Phase 6 — Release:** device testing, optimisation, signed release (Play Store keystore).
 
 Release APKs are currently signed with Unity's debug key. That's fine for installing on your own phone, but Google Play needs your own keystore.

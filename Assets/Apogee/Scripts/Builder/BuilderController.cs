@@ -95,6 +95,11 @@ namespace Apogee.Builder
             audioMgr.SetAmbience(Ambience.Hangar);
             Refresh();
             cam.Frame(view.WorldBounds, true);
+            var mission = Apogee.Game.Play.Mission;
+            if (mission != null) dialogs.Toast((Apogee.Game.Play.Career ? "Contract: " : "Mission: ") + mission.title + " — " + mission.brief, Theme.Accent, 6f);
+            else if (Apogee.Game.Play.mode == Apogee.Game.GameMode.Station) dialogs.Toast("Space Station: give your craft a docking port on its nose, reach 400 km and dock.", Theme.Accent, 6f);
+            else if (Apogee.Game.Play.mode == Apogee.Game.GameMode.Explorer) dialogs.Toast("Planet Explorer: your design will start on " + Apogee.Game.Play.explorerBody + ".", Theme.Accent, 5f);
+            else if (Apogee.Game.Play.Career) dialogs.Toast("Career: funds " + Apogee.Game.Costs.Money(Apogee.Game.Progress.Current.funds) + " · only researched parts are listed.", Theme.Accent, 5f);
         }
 
         RocketBlueprint LoadEntryBlueprint()
@@ -781,6 +786,7 @@ namespace Apogee.Builder
             if (!engine) { audioMgr.Play(Sfx.Error); dialogs.Toast("Add an engine before launching.", Theme.Warn); return; }
             StagingSystem.Restage(Bp);
             SaveSystem.Autosave(Bp);
+            if (Apogee.Game.Play.Career && !Apogee.UI.GameModesUI.ChargeLaunch(Bp)) { audioMgr.Play(Sfx.Error); return; }
             Session.flightBlueprint = Bp.DeepCopy();
             AppRoot.Instance.LoadScene(Scenes.Flight);
         }

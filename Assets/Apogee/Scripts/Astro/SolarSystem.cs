@@ -105,6 +105,13 @@ namespace Apogee.Astro
             return new Vector3d(Math.Cos(lat) * Math.Cos(lon), Math.Sin(lat), Math.Cos(lat) * Math.Sin(lon));
         }
 
+        /// <summary>Body-fixed unit vector (no spin applied) for a latitude/longitude — the frame position is Spin(t) × this.</summary>
+        public Vector3d FixedDirection(double latDeg, double lonDeg)
+        {
+            double lat = latDeg * Math.PI / 180, lon = lonDeg * Math.PI / 180;
+            return new Vector3d(Math.Cos(lat) * Math.Cos(lon), Math.Sin(lat), Math.Cos(lat) * Math.Sin(lon));
+        }
+
         public void LatLon(Vector3d r, double t, out double latDeg, out double lonDeg)
         {
             var n = r.normalized;
@@ -131,6 +138,48 @@ namespace Apogee.Astro
         }
 
         public override string ToString() { return name; }
+    }
+
+    /// <summary>A named place to land (historic landing sites, the launch complex).</summary>
+    public class LandingSite
+    {
+        public string name;
+        public string body;
+        public double lat, lon;
+        public LandingSite(string name, string body, double lat, double lon) { this.name = name; this.body = body; this.lat = lat; this.lon = lon; }
+
+        public static readonly List<LandingSite> All = new List<LandingSite>
+        {
+            new LandingSite("Equatorial Launch Complex", "Earth", 0.0, -51.07),
+            new LandingSite("Tranquility Base (Apollo 11)", "Moon", 0.674, 23.473),
+            new LandingSite("Shackleton crater rim (south pole)", "Moon", -89.67, -129.2),
+            new LandingSite("Copernicus crater", "Moon", 9.62, -20.08),
+            new LandingSite("Jezero Crater (Perseverance)", "Mars", 18.38, 77.58),
+            new LandingSite("Gale Crater (Curiosity)", "Mars", -5.4, 137.8),
+            new LandingSite("Huygens landing site", "Titan", -10.25, 192.3 - 360.0),
+        };
+
+        /// <summary>Great-circle distance (m) and initial bearing (deg from north) from (lat1,lon1) to this site on a body of radius R.</summary>
+        public void DistanceFrom(double lat1, double lon1, double R, out double dist, out double bearing)
+        {
+            double p1 = lat1 * Math.PI / 180, p2 = lat * Math.PI / 180, dl = (lon - lon1) * Math.PI / 180;
+            double c = Math.Sin(p1) * Math.Sin(p2) + Math.Cos(p1) * Math.Cos(p2) * Math.Cos(dl);
+            dist = R * Math.Acos(Math.Max(-1, Math.Min(1, c)));
+            bearing = (Math.Atan2(Math.Sin(dl) * Math.Cos(p2), Math.Cos(p1) * Math.Sin(p2) - Math.Sin(p1) * Math.Cos(p2) * Math.Cos(dl)) * 180 / Math.PI + 360) % 360;
+        }
+
+        public static LandingSite Nearest(CelestialBody b, double lat, double lon, out double dist, out double bearing)
+        {
+            LandingSite best = null; dist = double.MaxValue; bearing = 0;
+            foreach (var s in All)
+            {
+                if (s.body != b.name) continue;
+                double d, br;
+                s.DistanceFrom(lat, lon, b.radius, out d, out br);
+                if (d < dist) { dist = d; bearing = br; best = s; }
+            }
+            return best;
+        }
     }
 
     /// <summary>

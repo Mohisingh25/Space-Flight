@@ -1,5 +1,6 @@
 using System;
 using Apogee.Core;
+using Apogee.Game;
 using Apogee.Rocket;
 using Apogee.Simulation;
 using Apogee.Astro;
@@ -52,22 +53,18 @@ namespace Apogee.Flight
             vessel.time = hourAngle / 360.0 * SolarSystem.Earth.rotationPeriod;
             vessel.status = FlightStatus.Rollout;
             vessel.PlaceEastOf(SiteLat, SiteLon, crawlerEast, LaunchComplex.CrawlerDeck);
-            if (settings.cheatsEnabled)
+            settings.ApplyCheats(vessel.cheats);
+            if (Play.mode == GameMode.Sandbox)
             {
-                vessel.cheats.infiniteFuel = settings.cheatInfiniteFuel;
-                vessel.cheats.noGravity = settings.cheatNoGravity;
-                vessel.cheats.noDrag = settings.cheatNoDrag;
-                vessel.cheats.unbreakable = settings.cheatUnbreakable;
-                vessel.cheats.superThrust = settings.cheatSuperThrust;
-                vessel.cheats.noHeat = settings.cheatNoHeat;
                 switch (settings.cheatStart)
                 {
                     case 1: vessel.PlaceInOrbit(SolarSystem.Earth, 250000); break;
                     case 2: vessel.PlaceInOrbit(SolarSystem.Moon, 100000); break;
                     case 3: vessel.PlaceInOrbit(SolarSystem.Mars, 300000); break;
                 }
-                if (vessel.status == FlightStatus.Flying) { staged0 = true; lowering = 1f; crawlerEast = 300f; }
             }
+            SetupMode();
+            if (vessel.status == FlightStatus.Flying || vessel.body != SolarSystem.Earth) { staged0 = true; lowering = 1f; crawlerEast = 300f; }
 
             world = new GameObject("Flight World").AddComponent<FlightWorld>();
             world.Init(vessel);
@@ -85,7 +82,16 @@ namespace Apogee.Flight
             vessel.OnDebris += d => AppRoot.Instance.Audio.Play(Sfx.Detach, 0.8f);
             vessel.OnExplosion += (p, s) => AppRoot.Instance.Audio.Play(Sfx.Explosion, Mathf.Clamp01(s / 20f));
             vessel.OnCrash += OnCrash;
-            vessel.OnLanded += () => { AppRoot.Instance.Audio.Play(Sfx.Snap); warpIndex = 0; };
+            vessel.OnLanded += () =>
+            {
+                AppRoot.Instance.Audio.Play(Sfx.Snap);
+                warpIndex = 0;
+                double la, lo, d, b;
+                vessel.body.LatLon(vessel.pos, vessel.time, out la, out lo);
+                var site = LandingSite.Nearest(vessel.body, la, lo, out d, out b);
+                hud.Message("Touchdown on " + vessel.body.name + "!" + (site != null ? "  " + FlightHUD.Dist(d) + " from " + site.name : ""), 6f);
+                LogLanding(site, d);
+            };
             vessel.OnSoiChange += b => { if (warpIndex > 6) warpIndex = 6; };
 
             engineAudio = gameObject.AddComponent<AudioSource>();
@@ -93,7 +99,7 @@ namespace Apogee.Flight
             engineAudio.loop = true;
             engineAudio.volume = 0f;
             engineAudio.Play();
-            hud.Message(vessel.status == FlightStatus.Flying ? "Cheat start: in orbit around " + vessel.body.name : "Hold DRIVE to roll the rocket out to the pad", 4f);
+            hud.Message(startMessage ?? (vessel.status == FlightStatus.Flying ? "Cheat start: in orbit around " + vessel.body.name : "Hold DRIVE to roll the rocket out to the pad"), 5f);
             engines = vessel.EngineList();
             var names = new System.Collections.Generic.List<string>();
             for (int i = 0; i < engines.Count; i++)
@@ -431,6 +437,7 @@ namespace Apogee.Flight
             UpdateHud();
             UpdateEnginePanel();
             Milestones();
+            UpdateMode();
             UpdateAudio(paused);
         }
 
@@ -680,6 +687,24 @@ namespace Apogee.Flight
                 string col = v.maxTempFraction > 0.85f ? "#ff5544" : v.maxTempFraction > 0.6f ? "#ffbb44" : "#ffffff";
                 sb.Append("<color=").Append(col).Append(">Heat ").Append(Mathf.RoundToInt(v.maxTempFraction * 100f)).Append("% of limit</color>\n");
             }
+            // position on the planet, power, and where to land
+            double lat, lon;
+            v.body.LatLon(v.pos, v.time, out lat, out lon);
+            sb.Append(Math.Abs(lat).ToString("0.00")).Append(lat >= 0 ? "°N " : "°S ").Append(Math.Abs(lon).ToString("0.00")).Append(lon >= 0 ? "°E" : "°W").Append('\n');
+            if (v.body == SolarSystem.Earth)
+            {
+                double dr, brg;
+                LandingSite.All[0].DistanceFrom(lat, lon, v.body.radius, out dr, out brg);
+                sb.Append("Downrange ").Append(FlightHUD.Dist(dr)).Append('\n');
+            }
+            if (v.capacity > 0)
+            {
+                float pct = (float)(v.charge / v.capacity);
+                string pc = pct < 0.1f ? "#ff5544" : pct < 0.3f ? "#ffbb44" : "#ffffff";
+                sb.Append("<color=").Append(pc).Append(">Power ").Append(Mathf.RoundToInt(pct * 100)).Append("%</color> +")
+                  .Append(v.powerIn.ToString("0.00")).Append(" / -").Append(v.powerOut.ToString("0.00")).Append(" kW").Append(v.sunlit ? " (sun)" : " (night)").Append('\n');
+            }
+            else sb.Append("<color=#ff5544>No batteries</color>\n");
             if (v.transferFrom >= 0)
                 sb.Append("<color=#7fd4ff>Pumping ").Append(v.transferRate.ToString("0.0")).Append(" t/s → ").Append(v.state.byUid[v.transferTo].Def.displayName).Append("</color>\n");
             else if (v.transferPick >= 0)
@@ -690,6 +715,25 @@ namespace Apogee.Flight
             // navigation
             var nav = new System.Text.StringBuilder();
             if (v.status == FlightStatus.Flying && map.prediction != null) nav.Append(MapView.Summary(v, map.prediction));
+            if (v.status == FlightStatus.Flying && v.body.name != "Earth")
+            {
+                double slat, slon, sd, sbr;
+                v.body.LatLon(v.pos, v.time, out slat, out slon);
+                var site = LandingSite.Nearest(v.body, slat, slon, out sd, out sbr);
+                if (site != null)
+                {
+                    // bearing relative to where we're moving over the ground
+                    var sv = v.SurfaceVelocity;
+                    var up = v.Up;
+                    var north = (Vector3d.up - up * Vector3d.Dot(Vector3d.up, up)).normalized;
+                    var east = Vector3d.Cross(up, Vector3d.up).normalized;
+                    var h = sv - up * Vector3d.Dot(sv, up);
+                    double heading = h.magnitude > 1 ? (Math.Atan2(Vector3d.Dot(h, east), Vector3d.Dot(h, north)) * 180 / Math.PI + 360) % 360 : 0;
+                    double rel = ((sbr - heading) % 360 + 540) % 360 - 180;
+                    nav.Append("Landing site: ").Append(site.name).Append("\n").Append(FlightHUD.Dist(sd)).Append(" away, ")
+                       .Append(Math.Abs(rel) < 15 ? "dead ahead" : rel > 0 ? Math.Abs(rel).ToString("0") + "° right" : Math.Abs(rel).ToString("0") + "° left").Append('\n');
+                }
+            }
             if (v.target != null)
             {
                 nav.Append("Target ").Append(v.target.name).Append(": ").Append(FlightHUD.Dist(v.TargetRelativePosition().magnitude)).Append('\n');
@@ -743,6 +787,197 @@ namespace Apogee.Flight
             engineAudio.pitch = 0.85f + 0.25f * output;
         }
 
+        // ------------------------------------------------------------------ game modes
+
+        MissionTracker tracker;
+        string startMessage;
+        bool wasDocked, recovered;
+        float modeTimer;
+
+        void SetupMode()
+        {
+            var pr = Progress.Current;
+            // Planet Explorer: start on (or around) another world
+            if (Play.mode == GameMode.Explorer && Play.explorerBody != null)
+            {
+                var b = SolarSystem.Get(Play.explorerBody);
+                if (b != null)
+                {
+                    bool landed = !Play.explorerOrbit && Play.explorerSite >= 0 && Play.explorerSite < LandingSite.All.Count && LandingSite.All[Play.explorerSite].body == b.name;
+                    if (landed)
+                    {
+                        var site = LandingSite.All[Play.explorerSite];
+                        vessel = new FlightVessel(launchBlueprint.DeepCopy(), b, site.lat, site.lon);
+                        // arrive in the local morning
+                        double sunLon = FlightVessel.SunFacingLongitude(b, 0);
+                        double ha = ((sunLon - (site.lon + 35)) % 360 + 360) % 360;
+                        vessel.time = ha / 360.0 * Math.Abs(b.rotationPeriod);
+                        vessel.PlaceOnSurface(site.lat, site.lon, 0.15);
+                        startMessage = "Planet Explorer: on " + b.name + " at " + site.name + ". Unfold the legs, then STAGE to lift off.";
+                    }
+                    else
+                    {
+                        vessel = new FlightVessel(launchBlueprint.DeepCopy(), b, 0, 0);
+                        double alt = b.HasAtmosphere ? b.atmosphere.height + 40000 : Math.Max(30000, b.radius * 0.03);
+                        vessel.PlaceInOrbit(b, alt);
+                        startMessage = "Planet Explorer: in a " + FlightHUD.Dist(alt) + " orbit around " + b.name + ". Burn retrograde to come down.";
+                    }
+                    settings.ApplyCheats(vessel.cheats);
+                }
+            }
+
+            // Space station (Station mode or a mission that needs it)
+            var mission = Play.Mission;
+            if (Play.mode == GameMode.Station || (mission != null && mission.needsStation))
+            {
+                int modules = Mathf.Clamp(pr.stationModules, 0, 8);
+                if (Play.stationPractice)
+                {
+                    vessel.PlaceInOrbit(SolarSystem.Earth, 400000);
+                    var st = new Station(ExampleRockets.Station(modules), SolarSystem.Earth, 400000, 0, vessel);
+                    vessel.station = st;
+                    int port = -1;
+                    foreach (int u in vessel.state.alive) if (vessel.state.byUid[u].Def.isDockingPort) { port = u; break; }
+                    if (port >= 0)
+                    {
+                        Vector3 pl, al;
+                        vessel.PortFace(port, out pl, out al);
+                        var ax = st.PortAxisWorld;
+                        vessel.rot = Quaternion.FromToRotation(al, -ax);
+                        var goal = st.PortWorld + (Vector3d)(ax * 120f) + (Vector3d)(st.rot * new Vector3(6f, 0f, 4f));
+                        vessel.pos = goal - (Vector3d)(vessel.rot * (pl - vessel.comLocal));
+                        vessel.vel = st.vel;
+                        vessel.angVel = Vector3.zero;
+                    }
+                    vessel.sas = SasMode.Target;
+                    vessel.rcsOn = true;
+                    startMessage = "Docking practice: 120 m behind the station. RCS is on — FWD to close in, keep under 0.6 m/s at contact.";
+                }
+                else
+                {
+                    vessel.station = new Station(ExampleRockets.Station(modules), SolarSystem.Earth, 400000, vessel.status == FlightStatus.Flying ? 3 : 25, vessel);
+                    if (startMessage == null && vessel.status != FlightStatus.Flying)
+                        startMessage = "The station orbits at 400 km. Launch east, reach orbit, then raise it to catch up and dock.";
+                }
+            }
+
+            if (mission != null)
+            {
+                tracker = new MissionTracker(mission);
+                tracker.StepDone += o => { hud.Message("✓ " + o.text, 4f); AppRoot.Instance.Audio.Play(Sfx.Snap); };
+                tracker.Completed += OnMissionComplete;
+                if (startMessage == null) startMessage = (Play.Career ? "Contract: " : "Mission: ") + mission.title + " — " + mission.steps[0].text;
+            }
+        }
+
+        void UpdateMode()
+        {
+            if (tracker != null) tracker.Update(vessel);
+            modeTimer -= Time.unscaledDeltaTime;
+            if (modeTimer > 0f) return;
+            modeTimer = 0.2f;
+            var sb = new System.Text.StringBuilder();
+            if (tracker != null) sb.Append(tracker.Panel());
+            var st = vessel.station;
+            if (st != null)
+            {
+                if (sb.Length > 0) sb.Append("\n");
+                if (st.docked) sb.Append("<color=#7be08a>Docked to the station</color> · tap your docking port to undock");
+                else if (st.body != vessel.body) sb.Append("Station: around Earth");
+                else
+                {
+                    var rel = st.pos - vessel.pos;
+                    var rv = vessel.vel - st.vel;
+                    double closing = -Vector3d.Dot(rv, rel.normalized);
+                    sb.Append("<b>Station</b> ").Append(FlightHUD.Dist(rel.magnitude)).Append(" · rel. speed ").Append(rv.magnitude < 100 ? rv.magnitude.ToString("0.00") : rv.magnitude.ToString("N0")).Append(" m/s")
+                      .Append(closing >= 0 ? " closing" : " opening");
+                    double dAlt = st.pos.magnitude - vessel.pos.magnitude;
+                    if (rel.magnitude > 5000) sb.Append("\nStation is ").Append(FlightHUD.Dist(Math.Abs(dAlt))).Append(dAlt > 0 ? " higher" : " lower").Append(" · Tgt points at it");
+                    else sb.Append("\nUse Retro to kill relative speed, Tgt to face it, RCS FWD to approach");
+                }
+                if (st.docked && !wasDocked && !Play.stationPractice) DeliverModule();
+                wasDocked = st.docked;
+            }
+            else if (Play.Career && tracker == null)
+                sb.Append("Career · funds ").Append(Costs.Money(Progress.Current.funds));
+            hud.SetMission(sb.ToString());
+        }
+
+        void DeliverModule()
+        {
+            var pr = Progress.Current;
+            if (pr.stationModules >= 8) { hud.Message("Docked! The station is complete — crew exchange done.", 5f); return; }
+            pr.stationModules++;
+            if (Play.Career) { pr.funds += 150f; pr.science += 10; }
+            pr.Save();
+            hud.Message("Module delivered! The station now has " + (pr.stationModules + 1) + " modules" + (Play.Career ? "  (+$150k, +10 science)" : ""), 6f);
+        }
+
+        void OnMissionComplete()
+        {
+            var m = tracker.mission;
+            var pr = Progress.Current;
+            string reward = "";
+            if (Play.Career)
+            {
+                if (!pr.careerDone.Contains(m.id))
+                {
+                    pr.careerDone.Add(m.id);
+                    pr.funds += m.reward; pr.science += m.science; pr.reputation += m.tier * 5;
+                    reward = "\n+" + Costs.Money(m.reward) + "   +" + m.science + " science   +" + (m.tier * 5) + " reputation";
+                }
+            }
+            else if (!pr.missionsDone.Contains(m.id)) pr.missionsDone.Add(m.id);
+            pr.Save();
+            AppRoot.Instance.Audio.Play(Sfx.Snap);
+            StartCoroutine(ShowComplete(m.title, reward));
+        }
+
+        System.Collections.IEnumerator ShowComplete(string title, string reward)
+        {
+            yield return new WaitForSeconds(1.5f);
+            dialogs.Custom("Mission complete!", 900, 460, (body, close) =>
+            {
+                var t = UIFactory.Label(body, "<b>" + title + "</b>" + reward + "\n\nMission time " + FlightHUD.FormatTime(vessel.time), 26, Theme.Good, TextAnchor.MiddleCenter);
+                t.supportRichText = true;
+                UIFactory.Size(t, -1, 170);
+                var r = UIFactory.Rect("Row", body);
+                UIFactory.Size(r, -1, 84);
+                UIFactory.Horizontal(r, 12, 0, true).childForceExpandWidth = true;
+                UIFactory.Button(r, "Keep flying", close, ButtonStyle.Primary);
+                UIFactory.Button(r, "Main menu", () => { close(); AppRoot.Instance.LoadScene(Scenes.MainMenu); });
+            });
+        }
+
+        void LogLanding(LandingSite site, double dist)
+        {
+            var pr = Progress.Current;
+            string b = vessel.body.name;
+            bool changed = false;
+            if (b != "Earth" && !pr.bodiesLanded.Contains(b))
+            {
+                pr.bodiesLanded.Add(b); changed = true;
+                if (Play.Career) pr.science += 25;
+                hud.Message("First landing on " + b + "!" + (Play.Career ? "  +25 science" : ""), 6f);
+            }
+            if (site != null && site.body != "Earth" && dist < 25000 && !pr.sitesVisited.Contains(site.name))
+            {
+                pr.sitesVisited.Add(site.name); changed = true;
+                if (Play.Career) pr.science += 15;
+                hud.Message("Explored " + site.name + (Play.Career ? "  +15 science" : ""), 6f);
+            }
+            if (Play.Career && b == "Earth" && !recovered && vessel.HasCommand && vessel.time > 30)
+            {
+                recovered = true;
+                float value = 0f;
+                foreach (int u in vessel.state.alive) value += Costs.Part(vessel.state.byUid[u]);
+                value *= 0.85f;
+                pr.funds += value; changed = true;
+                hud.Message("Vessel recovered: +" + Costs.Money(value), 6f);
+            }
+            if (changed) pr.Save();
+        }
+
         // ------------------------------------------------------------------ menus
 
         void OnCrash()
@@ -767,11 +1002,21 @@ namespace Apogee.Flight
         void PauseMenu()
         {
             if (dialogs.HasModal) return;
-            dialogs.Custom(vessel.status == FlightStatus.Landed ? "Landed on " + vessel.body.name : "Flight paused", 900, 520, (body, close) =>
+            dialogs.Custom(vessel.status == FlightStatus.Landed ? "Landed on " + vessel.body.name : "Flight paused", 900, tracker != null ? 700 : 560, (body, close) =>
             {
                 var t = UIFactory.Label(body, "Mission time " + FlightHUD.FormatTime(vessel.time) + " · " + vessel.body.name, 24, Theme.Muted, TextAnchor.MiddleCenter);
                 UIFactory.Size(t, -1, 60);
-                UIFactory.Size(UIFactory.Button(body, "Resume", close, ButtonStyle.Primary), -1, 84);
+                if (tracker != null)
+                {
+                    var mt = UIFactory.Label(body, tracker.Panel(), 21, Theme.Text, TextAnchor.UpperLeft);
+                    mt.supportRichText = true;
+                    UIFactory.Size(mt, -1, 30 + 28 * tracker.mission.steps.Count);
+                }
+                var r0 = UIFactory.Rect("Row0", body);
+                UIFactory.Size(r0, -1, 84);
+                UIFactory.Horizontal(r0, 12, 0, true).childForceExpandWidth = true;
+                UIFactory.Button(r0, "Resume", close, ButtonStyle.Primary);
+                UIFactory.Button(r0, "Cheats", () => { close(); GameModesUI.OpenCheats(vessel.cheats, () => hud.cheatBadge.gameObject.SetActive(vessel.cheats.Any)); });
                 Buttons(body, close, true);
             });
         }

@@ -67,6 +67,8 @@ namespace Apogee.Flight
         public Action<int> OnEngineRow;
         public Action<bool> OnAllEngines;
         public Action OnEngineTab, OnSpeed;
+        public Text missionText;
+        public Image missionPanel;
         public Text telemetry, navInfo, warpLabel, message, hint, stageLabel, rolloutText, countdownText, cheatBadge, cockpitInstruments;
         public Image liquidFill, solidFill, rcsFill;
         public GameObject solidRow;
@@ -111,6 +113,19 @@ namespace Apogee.Flight
             cheatBadge = UIFactory.Label(root, "CHEATS ON", 20, Theme.Bad, TextAnchor.MiddleLeft, FontStyle.Bold);
             UIFactory.Place(cheatBadge.rectTransform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(24, -178), new Vector2(300, 30));
             cheatBadge.gameObject.SetActive(false);
+
+            // ---- mission / contract objectives
+            missionPanel = UIFactory.Panel(root, new Color(0f, 0f, 0f, 0.42f), true, "Mission");
+            if (UIFactory.Portrait)
+                UIFactory.Place(missionPanel.rectTransform, new Vector2(0, 1), new Vector2(0, 1), new Vector2(20, -212), new Vector2(560, 170));
+            else
+                UIFactory.Place(missionPanel.rectTransform, new Vector2(0.5f, 1), new Vector2(0.5f, 1), new Vector2(-40, -18), new Vector2(640, 160));
+            missionPanel.raycastTarget = false;
+            missionText = UIFactory.Label(missionPanel.transform, "", 20, Theme.Text, TextAnchor.UpperLeft);
+            missionText.supportRichText = true;
+            missionText.raycastTarget = false;
+            UIFactory.Stretch(missionText.rectTransform, 14, 8, 10, 8);
+            missionPanel.gameObject.SetActive(false);
 
             // ---- top-right: warp + telemetry
             warpDown = Btn("<<", () => Call(OnWarpDown), new Vector2(1, 1), new Vector2(-190, -18), new Vector2(110, 76), 30);
@@ -396,6 +411,13 @@ namespace Apogee.Flight
                 messageTime -= Time.unscaledDeltaTime;
                 messageGroup.alpha = Mathf.Clamp01(messageTime / 0.6f);
             }
+        }
+
+        public void SetMission(string text)
+        {
+            bool on = !string.IsNullOrEmpty(text);
+            if (missionPanel.gameObject.activeSelf != on) missionPanel.gameObject.SetActive(on);
+            if (on && missionText.text != text) missionText.text = text;
         }
 
         public Text MakeMapLabel(string text, Color c)

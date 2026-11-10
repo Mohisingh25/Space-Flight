@@ -148,7 +148,7 @@ namespace Apogee.Flight
         public void Build(CelestialBody b, double lat, double lon)
         {
             body = b;
-            var dir = b.SurfaceDirection(lat, lon, 0);
+            var dir = b.FixedDirection(lat, lon);
             siteFixed = dir * b.radius;
             var up = dir.ToFloat();
             var north = Vector3.ProjectOnPlane(Vector3.up, up).normalized;
